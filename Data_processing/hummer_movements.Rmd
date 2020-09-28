@@ -2,7 +2,7 @@
 title: "Hummingbird Movement"
 author: "Gannon et al."
 date: "2/24/2020"
-output: html_document
+output: pdf_document
 bibliography: /Users/dusty/Documents/zotero_library.bib
 ---
 

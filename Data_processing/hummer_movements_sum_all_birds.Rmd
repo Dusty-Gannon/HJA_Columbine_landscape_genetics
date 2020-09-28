@@ -1,0 +1,281 @@
+---
+title: "Hummingbird Movement"
+author: "Gannon et al."
+date: "2/24/2020"
+output: html_document
+bibliography: /Users/dusty/Documents/zotero_library.bib
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, eval = FALSE)
+
+  require(dplyr)
+  require(stringr)
+  require(sf)
+  require(raster)
+  require(lubridate)
+
+```
+
+ The final datasets will include observations of hummingbird movements among different RFID readers across the HJA meadows. We combine information on distances between readers, cover-type in which each reader was placed, proportion of intervening forest, and individual birds to inform models of hummingbird movement among foraging patches.
+ 
+$~$ 
+
+Read in RFID-reader data and reader location data:
+
+```{r data}
+#read in data
+ vis <- read.table("~/Documents/Columbine/Data/Bird_data/all_visits2.txt", header = F, sep = "\t", as.is = T)
+   names(vis) <- c("bird", "date", "time", "seconds", "complex", "reader")
+# remove headquarters tests
+   vis <- vis[-which(vis$complex == "HQ"), ]
+
+# combine C-upper and C-lower with C
+  # These readers are in the same meadow, so we can consider visits as evidence the bird in in that meadow
+  vis$reader[which(vis$reader == "CU")] <- "C"
+  vis$reader[which(vis$reader == "CL")] <- "C"
+  vis$reader[which(vis$reader == "CW")] <- "C"
+   
+# combine complex and reader to make unique identifier for each reader
+  vis$reader <- paste(vis$complex, vis$reader, sep = "_")
+
+# load data on reader locations 
+  rlocs <- read.table("~/Documents/Columbine/Data/Bird_data/hja_reader_locations_centercomb.txt", header = T, sep = "\t", as.is = T)
+ 
+```
+
+$~$
+
+Remove any duplicated observations. The data were sometimes downloaded multiple times and resulted in duplicates.
+```{r}
+
+  vis <- vis[which(!duplicated(vis[,c(1:3)])), ]
+
+```
+
+
+ To create the movement dataset, sort data by bird, then by date and time. Then, loop through data one row at a time to check that a bird moved from one reader to another within the same day.
+ 
+```{r movements}
+
+  vis.sort <- vis[order(vis$bird, vis$date, vis$seconds), ]
+
+# add a column for the year
+  vis.sort$year <- str_extract(vis.sort$date, "[[:digit:]]{4}")
+  
+# turn date into day of the year
+  vis.sort$date2 <- ymd(vis.sort$date)
+  vis.sort$day <- yday(vis.sort$date)
+
+# create template matrix
+  rdrs <- rlocs$reader
+  nrdrs <- length(rdrs)
+  
+# create movement dataset
+  birds_all <- unique(vis.sort$bird)
+
+# Fill dataframe with movements
+    cnts <- matrix(data=0, nrow = nrdrs, ncol=nrdrs)
+      for(i in 2:nrow(vis.sort)){
+        if((vis.sort$date[i] == vis.sort$date[i-1]) &
+           (vis.sort$bird[i] == vis.sort$bird[i-1]) &
+            (vis.sort$reader[i] != vis.sort$reader[i-1])){
+            r1 <- which(rdrs == vis.sort$reader[i-1])
+            r2 <- which(rdrs == vis.sort$reader[i])
+            cnts[r1,r2] <- cnts[r1,r2] + 1
+        }
+      }
+
+  #write out into movement dataframe
+  
+  mv <- data.frame(reader1=rep(rdrs, nrdrs),
+                   reader2=rep(rdrs, each=nrdrs),
+                   count=as.vector(cnts))
+      
+```
+
+
+Remove rows for $i \to i$ movements.
+
+```{r}
+
+  rows_ii <- double()
+  for(i in 1:nrow(mv)){
+    if(mv$reader1[i] == mv$reader2[i]){
+      rows_ii <- c(rows_ii,i)
+    }
+  }
+
+  mv <- mv[-rows_ii, ]
+
+```
+
+
+ Now add in spatial data pertaining to each "edge": distance between readers, proportion of intervening forest, and cover types connected by the edge (i.e. meadow-meadow, meadow-mix, meadow-forest, meadow-scrub).
+ 
+**Edge length**
+```{r edge distances}
+
+  coords_r <- as.matrix(rlocs[,c(4,5)])
+  ones <- matrix(1, nrow = nrow(coords_r), ncol = 1)
+
+# compute euclidean distance matrix
+  D_rsq <- diag(coords_r%*%t(coords_r))%*%t(ones) + ones%*%t(diag(coords_r%*%t(coords_r))) - 2*(coords_r%*%t(coords_r))
+  
+  D_r <- sqrt(D_rsq)
+  rownames(D_r) <- rlocs$reader
+  colnames(D_r) <- rownames(D_r)
+  
+  dist.list <- data.frame(reader1=rep(rdrs,nrdrs),
+                          reader2=rep(rdrs, each=nrdrs),
+                          dist.km=as.vector(D_r)/1000)
+# add distance to movement data
+  mv$edgename <- paste(mv$reader1, mv$reader2, sep = "-")
+  dist.list$edgename <- paste(dist.list$reader1, dist.list$reader2, sep = "-")
+  mv2 <- merge(mv, dist.list[,c(3,4)])
+
+```
+
+$~$
+
+Now add cover types for reader1 and reader2:
+
+```{r cover types}
+#habitat for reader 1
+  mv3 <- merge(mv2, rlocs[,c(1,6)], by.x="reader1", by.y="reader")
+  names(mv3)[which(names(mv3)=="habitat")] <- "hab1"
+  
+#habitat for reader 2
+  mv3 <- merge(mv3, rlocs[,c(1,6)], by.x="reader2", by.y="reader")
+  names(mv3)[which(names(mv3)=="habitat")] <- "hab2"
+  
+
+```
+
+$~$
+
+**Proportion of forest vs. non-forest cells intersected by each edge**
+
+```{r proportion forest}
+
+# Create points data
+ utm.prj4 <- "+proj=utm +zone=10 +ellps=GRS80 +datum=NAD83 +units=m +no_defs"
+ crs <- st_crs(utm.prj4)
+
+  readers.sp <- st_multipoint(coords_r, dim = "XY")
+
+  reader.points <- st_cast(st_geometry(readers.sp), "POINT") 
+  st_crs(reader.points) <- crs
+# Build line pairs
+  
+  linestrings <- list()
+  
+  for(j in 2:nrow(readers.sp)){
+    for(i in 1:(j-1)){
+      pair_ij <- st_combine(c(reader.points[i], reader.points[j]))
+      linestrings[[length(linestrings)+1]] <- pair_ij
+    }
+  }
+
+
+# combine all linestrings into one object
+  
+  edges.sp <- st_multilinestring(do.call("rbind", linestrings))
+  
+  edges.aslines <- st_cast(st_geometry(edges.sp), "MULTILINESTRING")
+    st_crs(edges.aslines) <- crs
+
+  
+# Extract proportion of forest in buffer around readers
+  forest <- raster("~/Documents/Columbine/Data/GIS_Data/forest.tif")
+     rlocs$prop_for100 <- extract(forest, y=as.matrix(rlocs[,c(4,5)]), buffer=100, fun=mean, na.rm=T)
+     # rlocs$prop_for50 <- extract(forest, y=as.matrix(rlocs[,c(4,5)]), buffer=50, fun=mean, na.rm=T)
+     # rlocs$prop_for200 <- extract(forest, y=as.matrix(rlocs[,c(4,5)]), buffer=200, fun=mean, na.rm=T)
+  
+#Extract proportion of edge covered by forest using the 'forest' raster
+  prop.for <- lapply(X=1:length(linestrings),
+                     FUN = function(x){
+                       extract(forest, st_sf(st_cast(st_geometry(linestrings[[x]]), "LINESTRING")), fun=mean, na.rm=T, df=T)
+                     })
+  
+  prop.for.df <- matrix(unlist(prop.for), ncol = 2, byrow = T)
+  prop.for.mat <- matrix(data = 0, nrow = nrdrs, ncol = nrdrs)
+  prop.for.mat[lower.tri(prop.for.mat)] <- prop.for.df[,2]
+  mat2 <- t(prop.for.mat)
+  prop.for.mat <- prop.for.mat + mat2
+  diag(prop.for.mat) <- NA
+  
+  prop.for.list <- data.frame(reader1=rep(rdrs, nrdrs),
+                              reader2=rep(rdrs, each=nrdrs),
+                              prop.for=as.vector(prop.for.mat))
+  prop.for.list$edgename <- paste(prop.for.list$reader1, prop.for.list$reader2, sep="-")
+  
+#merge two datasets
+   mv4 <- merge(mv3, prop.for.list[,c(3,4)])
+   
+ 
+```
+
+Now get the number of days each edge/link was available to birds:
+
+```{r}
+
+  mv4$active_days <- NA
+  for(i in 1:nrow(mv4)){
+    ds1 <- rlocs$days_active[which(rlocs$reader==mv4$reader1[i])]
+    ds2 <- rlocs$days_active[which(rlocs$reader==mv4$reader2[i])]
+    mv4$active_days[i] <- min(c(ds1,ds2))
+  }
+
+```
+
+```{r}
+
+# Preferred order
+ c.order <- c("reader1", "reader2", "edgename", "hab1", "hab2",
+              "dist.km", "prop.for", "active_days", "count")
+
+  mv5 <- mv4[,c.order]
+   
+# now create a dyad identifier
+  mv5$dyad <- NA
+  for(i in 1:nrow(mv5)){
+    dyad_i <- sort(c(mv5$reader1[i], mv5$reader2[i]))
+    mv5$dyad[i] <- paste(dyad_i, collapse = '-')
+  }
+  
+ c.order2 <- c("reader1", "reader2", "dyad", "edgename", "hab1", "hab2",
+              "dist.km", "prop.for", "active_days", "count")
+ 
+ mv5 <- mv5[,c.order2]
+
+```
+
+Save the dataset:
+
+```{r}
+
+  write.csv(mv5, file = "~/Documents/Columbine/Data/Bird_data/movements_sum_all_birds.csv", quote = F, row.names = F)
+
+```
+
+
+**References**
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

@@ -1,0 +1,200 @@
+---
+title: "Pollen dispersal"
+author: "D. G. Gannon"
+date: "7/23/2020"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+require(dplyr)
+require(raster)
+require(stringr)
+
+# User-defined functions
+
+  l2norm <- function(x){
+    return((sum(x^2))^(1/2))
+  }
+
+```
+
+
+**Load in the data**
+
+```{r load and format data}
+
+# load in the focal plant data
+  focals <- read.csv("~/Documents/Columbine/Data/AQUFOR_focals/AQUFOR_dye_focals.csv", header = T)
+  focals2 <- focals[complete.cases(focals[,c(7,8)]), ]
+  
+# compute the proportion of forest surrounding each focal plant
+  forest <- raster("~/Documents/Columbine/Data/GIS_Data/forest.tif")
+  focals2$prop_for100m <- raster::extract(forest, as.matrix(focals2[,c(7,8)]), 
+                                          fun=mean, buffer=100, na.rm=T)
+  
+# unique ID for each plant
+  focals2$Plant <- str_extract(focals2$Plant, "_[[:digit:]]+")
+  focals2$Plant <- paste(focals2$meadow_ID, focals2$Plant, sep = "")
+  
+# read in the dye data
+  dye <- read.csv("~/Documents/Columbine/Data/AQUFOR_focals/AQUFOR_dye_counts.csv", header = T)
+  styles <- read.csv("~/Documents/Columbine/Data/AQUFOR_focals/AQUFOR_style_collections.csv", header = T)
+  
+# subset dye counts and style collections for meadows with focal data
+  mdws <- focals2$meadow_ID
+  dye2 <- dye[which(dye$meadow_ID %in% mdws), ]
+  styles2 <- styles[which(styles$Meadow_ID %in% mdws), ]
+  
+# subset for the columns we want
+  styles_cols <- c("Meadow_ID", "Vial", "FLR_within_5m", "Projection", "X", "Y")
+  dye_cols <- c("meadow_ID", "Vial.Number", "Orange", "Blue", "Green", "Orange_count", "Blue_count", "Green_count")
+  styles2 <- styles2[,which(names(styles2) %in% styles_cols)]
+  dye2 <- dye2[,which(names(dye2)%in%dye_cols)]
+  
+# create unique plant ID
+  dye2$plant <- paste(dye2$meadow_ID, "_v", dye2$Vial.Number, sep = "")
+  styles2$plant <- paste(styles2$Meadow_ID, "_v", styles2$Vial, sep="")
+  
+# merge the two datasets by plant ID
+  dye_all <- merge(styles2, dye2, by="plant")
+  dye_all[which(dye_all$X == "N/A"), c(6,7)] <- NA
+  dye_all[which(dye_all$X == ""), c(6,7)] <- NA
+  dye_all <- dye_all[-which(is.na(dye_all$X)), ]
+  
+# reduce unnecessary columns
+  cols_all <- c("plant", "Meadow_ID", "FLR_within_5m", "Projection",
+                "X", "Y", "Orange", "Blue", "Green", "Orange_count",
+                "Blue_count", "Green_count")
+  dye_all <- dye_all[,which(names(dye_all)%in%cols_all)]
+  
+```
+
+We now need to convert colors under a fluorescent light to those seen by the human eye.
+
+\begin{tabular}{ll}
+Natural light & Fluorescent light\\
+\hline
+white & blue\\
+pink & orange\\
+yellow & green
+\end{tabular}
+
+$~$
+
+```{r convert colors}
+
+  focals2$Powder_Color[which(focals2$Powder_Color == "WHITE")] <- "Blue"
+  focals2$Powder_Color[which(focals2$Powder_Color == "HOT_PINK")] <- "Orange"
+  focals2$Powder_Color[which(focals2$Powder_Color == "YELLOW")] <- "Green"
+  
+# remove rows without the treatment defined
+  focals3 <- focals2[-which(is.na(focals2$Treatment)), ]
+
+```
+
+
+$~$
+
+
+We also want to include the number of plants within 5m of the focal plant as a potential covariate determining the movement of pollen from the father plant. For missing values, I impute the mean value from the plants from which we collected leaf samples.
+
+```{r imputation}
+
+  gen_samps <- read.csv("~/Documents/Columbine/Data/sample_data_allplants.csv", header = T)
+  meads_missing <- unique(focals3$meadow_ID[which(is.na(focals3$plants_within_5m))])
+  
+# subset by meadow
+  gen_samps <- gen_samps[which(gen_samps$MEADOW_ID %in% meads_missing), ]
+  
+# compute means by meadow
+  mean_pl5m <- group_by(gen_samps[,c(2,12)], MEADOW_ID) %>% summarise(., mean=mean(PL_IN_5M))
+  
+# impute
+  for(i in 1:nrow(mean_pl5m)){
+    focals3$plants_within_5m[which(is.na(focals3$plants_within_5m) & 
+                                     focals3$meadow_ID == as.character(mean_pl5m[i,1]))] <- as.numeric(mean_pl5m[i,2])
+  }
+
+```
+
+
+
+For the final dataset, we want the focal plant, paired plant, distance between them, and the dye count as well as the proportion of styles with dye.
+
+```{r create final dataset}
+
+  cnames <- c("meadow_ID", "Foc_plant", "X.foc", "Y.foc",
+                        "FLR_within_5m.foc", "Treatment", "Powder_color",
+                        "prop_for100m.foc", "mother_plant", "FLR_within_5m.moth",
+                        "projection", "X.moth", "Y.moth", "prop_styles_dye",
+                        "dye_count")
+  dispersal <- as.data.frame(matrix(ncol = length(cnames)))
+  names(dispersal) <- cnames
+  sire_cols <- c("meadow_ID", "Plant", "X", "Y", "plants_within_5m",
+                "Treatment", "Powder_Color", "prop_for100m")
+
+  for(i in 1:nrow(focals3)){
+    color_i <- focals3$Powder_Color[i]
+    df_i <- subset(dye_all, Meadow_ID==focals3$meadow_ID[i])
+    if(nrow(df_i) > 0){
+      df_i <- df_i[,c(1:6,which(names(df_i)==color_i), which(names(df_i)==color_i)+3)]
+      focdf_i <- focals3[i,which(names(focals3)%in%sire_cols)]
+      focdf_i <- focdf_i[rep(1, nrow(df_i)), ]
+      df_i <- cbind(focdf_i, df_i)
+      df_i <- df_i[,-10]
+      names(df_i) <- cnames
+      dispersal <- rbind(dispersal, df_i)
+    }
+  }
+  
+  dispersal <- dispersal[which(complete.cases(dispersal)), ]
+  
+  dispersal$dist <- NA
+  for(i in 1:nrow(dispersal)){
+    x1 <- as.double(dispersal[i,which(names(dispersal)%in%c("X.foc", "Y.foc"))])
+    x2 <- as.double(dispersal[i, which(names(dispersal)%in%c("X.moth", "Y.moth"))])
+    dispersal$dist[i] <- l2norm(x1-x2)
+  }
+  
+# add meadow size
+  meadow.data <- read.csv("~/Documents/Columbine/Data/meadow_data.csv", header = T, as.is = T)
+  dispersal$meadow_ID[which(dispersal$meadow_ID == "LOMWS")] <- "LOMMWS"
+  dispersal <- merge(dispersal, meadow.data[,c(2,3)], by.x="meadow_ID", by.y="MEADOW_ID")
+
+# because we want a dispersal kernel for each father plant, I average over
+#  the "projection" and "FLRs_within_5m.moth" to get average characteristics of available mothers
+  dispersal2 <- data.frame(NULL)
+  dispersal$projection <- as.double(dispersal$projection)
+  dispersal$FLR_within_5m.moth <- as.double(dispersal$FLR_within_5m.moth)
+  meadows <- unique(dispersal$meadow_ID)
+  for(m in meadows){
+    df.temp <- subset(dispersal, meadow_ID==m)
+    df.temp2 <- df.temp[which(!duplicated(df.temp$mother_plant)), ]
+    df.temp$mean_proj <- rep(mean(df.temp2$projection), nrow(df.temp))
+    df.temp$mean_flrdens <- rep(mean(df.temp2$FLR_within_5m.moth), nrow(df.temp))
+    dispersal2 <- rbind(dispersal2, df.temp)
+  }
+  
+# rearrange columns in preferred order
+  dispersal2 <- dispersal2[,c(1,17,2:11,18,19,12:16)]
+  names(dispersal2)[2] <- "meadow_area"
+  
+  write.csv(dispersal2, file = "~/Documents/Columbine/Data/AQUFOR_focals/AQUFOR_dye_dispersal.csv", 
+            row.names = F, quote = F)
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+

@@ -46,7 +46,6 @@
   #snps must be present in 85% of samples in a population, and all four populations
   SGE_Batch -c "populations -P /raid1/home/bpp/gannondu/HJA_Columbine/stacks_round2/ -O /raid1/home/bpp/gannondu/HJA_Columbine/stacks_round2/populations_r80merge/ -M /raid1/home/bpp/gannondu/HJA_Columbine/stacks_round2/popmap_round2.tsv -t 16 -r 0.85 -p 4 --write-random-snp --merge-sites -e apeKI --vcf --ordered-export" -r populations1 -P 16
 
-
 ##########################################################################################
 
 

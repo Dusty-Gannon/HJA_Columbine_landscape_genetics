@@ -1,7 +1,7 @@
 ---
 title: "SNP filtering using vcfR"
 author: "D. G. Gannon"
-date: "2/4/2020"
+date: "September 2020"
 output: pdf_document
 bibliography: /Users/dusty/Documents/zotero_library.bib
 header-includes:
@@ -13,6 +13,8 @@ header-includes:
 knitr::opts_chunk$set(echo = TRUE)
 
   require(vcfR)
+  require(stringr)
+
 ```
 
   Previous quality filters up to this point include:  
@@ -127,10 +129,62 @@ $~$
 **Figure 1** Heatmap of sequencing depth across the filtered dataset.
 
 
- We work with this final vcf file containing `r round(sum(is.na(col.gt))/(nrow(col.gt)*ncol(col.gt)),4)*100` percent missing information, `r dim(dp.good)[1]` SNPs and 192 individual plants. We impute the missing genotypes using \texttt{BEAGLE} [@browning2016]. 
+ With this vcf file containing `r round(sum(is.na(col.gt))/(nrow(col.gt)*ncol(col.gt)),4)*100` percent missing information, `r dim(dp.good)[1]` SNPs and 192 individual plants, we impute the missing genotypes using \texttt{BEAGLE} [@browning2016].
+ 
+$~$
 
+\subsubsection{Filtering SNPs based on exon annotations}
 
+Read in the annotations file from the *A. coerulea* genome and store as a dataframe.
+
+```{r annotations}
+
+# read in the imputed vcf
+  col.vcf.good <- read.vcfR(file = "~/Documents/Columbine/Data/GBS_Data/AQFO_snsp_impute.vcf")
+  ann <- read.table("~/Documents/Columbine/Data/GBS_Data/Acoerulea_322_v3.1.gene_exons.gff3",
+                    header = F, sep = "\t", as.is = T)[,c(1,3:5,7)]
+
+# name columns
+  names(ann) <- c("Chrom", "annot", "start", "stop", "strand")
   
+# structure of the data
+  head(ann)
+  
+```
+
+```{r annotate, eval=FALSE}
+# annotate snps
+  snps <- as.data.frame(col.vcf.good@fix)
+  snps$POS <- as.numeric(snps$POS)
+  snps$strand <- str_split(snps$ID, ":", simplify = T)[,3]
+  snps$SOFA <- NA
+  
+  for(i in 1:nrow(snps)){
+    annots_i <- which((ann$Chrom == snps$CHROM[i]) &
+           (ann$start < snps$POS[i]) &
+            (ann$stop > snps$POS[i]) &
+            ann$strand == snps$strand[i])
+    if(length(annots_i) == 1){
+      snps$SOFA[i] <- ann$annot[annots_i]
+    } else if(length(annots_i) > 1){
+      snps$SOFA[i] <- paste(sort(unique(ann[annots_i,]$annot)), collapse = ":")
+    } else {
+      snps$SOFA[i] <- "NC"
+    }
+  }
+  
+# create "neutral" vcf
+  
+  col.vcf.nc <- col.vcf.good[which(snps$SOFA == "NC"), ]
+  col.vcf.cd <- col.vcf.good[which(snps$SOFA != "NC"), ]
+  
+  write.vcf(col.vcf.nc, file = "~/Documents/Columbine/Data/GBS_Data/AQFO_snps_nc.vcf")
+  write.vcf(col.vcf.cd, file = "~/Documents/Columbine/Data/GBS_Data/AQFO_snps_cd.vcf")
+  
+```
+
+
+ 
 $~$
 
 \subsubsection{References}

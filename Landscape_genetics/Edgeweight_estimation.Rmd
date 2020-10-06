@@ -5,6 +5,7 @@ date: "October 2020"
 output:
   github_document:
     pandoc_args: --webtex
+bibliography: /Users/dusty/Documents/zotero_library.bib
 ---
 
 ```{r setup, include=FALSE}
@@ -21,17 +22,25 @@ We have SNP data on $n=192$ *Aquilegia formosa* individuals from XX meadows, whi
 Letting $\tilde{\bf L}$ be the column-centered loadings matrix, we compute ${\bf D}$ as
 
 $$
-{\bf D} = \text{diag}({\bf G}){\bf 1}^\text{T} - 2{\bf G} + \text{diag}({\bf G}){\bf 1}^{\text{T}},
+{\bf D} = \text{diag}({\bf G}){\bf 1}' - 2{\bf G} + \text{diag}({\bf G}){\bf 1}',
 $$
 
 where ${\bf G} = \tilde{\bf L}^\text{T} \tilde{\bf L}$ and ${\bf 1}$ is an $n$-dimensional vector of ones.
 
 ## Model
 
-We assume that ${\bf D}$
+We assume that $-{\bf D} \sim \text{Wishart}(1,\ 2{\boldsymbol \Sigma})$, where
 
+$$
+\boldsymbol{\Sigma} = ({\bf M} - \rho{\bf W})^{-1}.
+$$
 
+Above, ${\bf W}_{(n\times n)}$ is the weights matrix. It determines the degree of connectivity among nodes (individuals) in a spatial network and is the parameter of interest. We model the weight between individuals $i$ and $j$ as a log-linear combination of covariates and regression parameters such that
 
+$$
+w_{ij} = \exp\{{\bf x}_{ij}'\boldsymbol \beta\},
+$$
+where ${\bf x}_{ij}$ is a vector of covariates for individuals $i$ and $j$ and $\boldsymbol \beta$ is a vector of regression parameters.
 
 
 

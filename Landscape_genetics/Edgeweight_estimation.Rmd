@@ -1,0 +1,42 @@
+---
+title: "Estimating edge weights connecting HJA columbine genetic networks"
+author: "D. G. Gannon"
+date: "October 2020"
+output:
+  github_document:
+    pandoc_args: --webtex
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+  require(rstan)
+
+```
+
+## Data
+
+We have SNP data on $n=192$ *Aquilegia formosa* individuals from XX meadows, which we consider to be "sub-populations" of the H.J. Andrews *A. formosa* population. We work with a centered, euclidean distance matrix, ${\bf D}_{(n\times n)}$, computed from a genetic loading matrix ${\bf L}_{(n\times \ell)}$, where $\ell$ is the number of SNP loci sequenced. Genetic loadings are coded as ${\bf L}_{ik} = 0$ if individual $i$ is homozygous for the reference allele at locus $k$, ${\bf L}_{ik}=1$ if individual $i$ has a heterozygous genotype at site $k$, and ${\bf L}_{ik}=2$ if individual $i$ is homozygous with two copies of the alternative allele at site $k$. The data were previously filtered to include only bi-allelic loci. 
+
+Letting $\tilde{\bf L}$ be the column-centered loadings matrix, we compute ${\bf D}$ as
+
+$$
+{\bf D} = \text{diag}({\bf G}){\bf 1}^\text{T} - 2{\bf G} + \text{diag}({\bf G}){\bf 1}^{\text{T}},
+$$
+
+where ${\bf G} = \tilde{\bf L}^\text{T} \tilde{\bf L}$ and ${\bf 1}$ is an $n$-dimensional vector of ones.
+
+## Model
+
+We assume that ${\bf D}$
+
+
+
+
+
+
+
+
+
+
+

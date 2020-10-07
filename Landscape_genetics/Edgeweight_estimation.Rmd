@@ -15,11 +15,11 @@ knitr::opts_chunk$set(echo = TRUE)
 
 ```
 
-## Data
+### Data
 
-We have SNP data on $n=192$ *Aquilegia formosa* individuals from XX meadows, which we consider to be "sub-populations" of the H.J. Andrews *A. formosa* population. We work with a centered, euclidean distance matrix, ${\bf D}_{(n\times n)}$, computed from a genetic loading matrix ${\bf L}_{(n\times \ell)}$, where $\ell$ is the number of SNP loci sequenced. Genetic loadings are coded as ${\bf L}_{ik} = 0$ if individual $i$ is homozygous for the reference allele at locus $k$, ${\bf L}_{ik}=1$ if individual $i$ has a heterozygous genotype at site $k$, and ${\bf L}_{ik}=2$ if individual $i$ is homozygous with two copies of the alternative allele at site $k$. The data were previously filtered to include only bi-allelic loci. 
+We have SNP data on $n=192$ *Aquilegia formosa* individuals from XX meadows, which we consider to be "sub-populations" of the H.J. Andrews *A. formosa* population. We work with a centered, euclidean distance matrix, ${\bf D}_{(n\times n)}$, computed from a genetic loading matrix $l_{(n\times \ell)}$, where $\ell$ is the number of SNP loci sequenced. Genetic loadings are coded as $l_{ik} = 0$ if individual $i$ is homozygous for the reference allele at locus $k$, $l_{ik}=1$ if individual $i$ has a heterozygous genotype at site $k$, and $l_{ik}=2$ if individual $i$ is homozygous with two copies of the alternative allele at site $k$. The data were previously filtered to include only bi-allelic loci. 
 
-Letting $\tilde{\bf L}$ be the column-centered loadings matrix, we compute ${\bf D}$ as
+Letting $\tilde{\bf L}$ be the column-centered loadings matrix (i.e. $\tilde l_{ik} = l_{ik} - \bar{l}_{\cdot k}$, where $\bar{l}_{\cdot k}$ is the average loading at position $k$), we compute ${\bf D}$ as
 
 $$
 {\bf D} = \text{diag}({\bf G}){\bf 1}' - 2{\bf G} + \text{diag}({\bf G}){\bf 1}',
@@ -27,7 +27,7 @@ $$
 
 where ${\bf G} = \tilde{\bf L}^\text{T} \tilde{\bf L}$ and ${\bf 1}$ is an $n$-dimensional vector of ones.
 
-## Model
+### Model
 
 We assume that $-{\bf D} \sim \text{Wishart}(1,\ 2{\boldsymbol \Sigma})$, where
 
@@ -35,17 +35,36 @@ $$
 \boldsymbol{\Sigma} = ({\bf M} - \rho{\bf W})^{-1}.
 $$
 
-Above, ${\bf W}_{(n\times n)}$ is the weights matrix. It determines the degree of connectivity among nodes (individuals) in a spatial network and is the parameter of interest. We model the weight between individuals $i$ and $j$ as a log-linear combination of covariates and regression parameters such that
+Above, ${\bf W}_{(n\times n)}$ is the weights matrix. It determines the degree of connectivity among nodes (individuals) in a spatial network and is the parameter of interest. The parameter ${\bf M}$ is a diagonal matrix with $m_{ii} = \sum_{j=1}^nw_{ij}$ and all off-diagonal elements equal to zero, and $\rho$ controls the amount of spatial autocorrelation among the genotypes of nearby individuals. We model the weight between individuals $i$ and $j$ as a log-linear combination of covariates and regression parameters such that
 
 $$
-w_{ij} = \exp\{{\bf x}_{ij}'\boldsymbol \beta\},
+w_{ij} = \exp\{{\bf x}_{ij}'\boldsymbol \beta + a_i\},
 $$
-where ${\bf x}_{ij}$ is a vector of covariates for individuals $i$ and $j$ and $\boldsymbol \beta$ is a vector of regression parameters.
+where ${\bf x}_{ij}$ is a vector of covariates for individuals $i$ and $j$, $\boldsymbol \beta$ is a vector of regression parameters, and $a_i$ is an effect for the individual plant. We assume $a_1,a_2,...,a_n \sim \mathcal{N}(0,\sigma^2)$. Our covariates of interest are 
 
+* geographic distance (km)
+* proportion of forested cells that intersect the Euclidean line between plants $i$ and $j$
+* percent canopy cover for plant $i$
+* percent canopy cover for plant $j$
+* flowering plant density around plant $i$ (individuals/25$\pi \text{m}^2$)
+* flowering plant density around plant $j$ (individuals/25$\pi \text{m}^2$)
 
+### Priors
 
+We assume the following weakly informative priors for the regression parameters, $\rho$, and $\sigma$:
 
+$$
+{\boldsymbol \beta} \sim \mathcal{N}({\bf 0}_P,\ {\bf I}_{(P\times P)}),
+$$
 
+$$
+\rho \sim \mathcal{U}(0,1),
+$$
 
+and
+
+$$
+\sigma \sim \text{half-Normal}(0,2).
+$$
 
 

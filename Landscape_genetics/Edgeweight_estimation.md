@@ -154,4 +154,79 @@ and
 \\text{half-Normal}(0,2).&#10;](https://latex.codecogs.com/png.latex?%0A%5Csigma%20%5Csim%20%5Ctext%7Bhalf-Normal%7D%280%2C2%29.%0A
 "
 \\sigma \\sim \\text{half-Normal}(0,2).
-")
+")  
+
+#### Stan Model Code
+
+``` stan
+
+functions{
+
+  matrix make_W(int N, vector v, real[,,] X){
+    matrix[N,N] W;
+    for(i in 1:N){
+      if(i == 1){W[i,i] = 0;}
+      else{
+        for(j in 1:(i-1)){
+          W[i,i] = 0;
+          W[i,j] = exp(to_row_vector(X[i,j,])*v);
+          W[j,i] = W[i,j];
+        }
+      }
+    }
+    return(W);
+  }
+
+}
+
+data{
+
+  int<lower=1> N;          //number of individuals sampled
+  int<lower=1> L;          //number of SNP loci
+  int<lower=1> P;          //number of landscape variables
+  
+  real X[N,N,P];        //design array
+  matrix[N,N] D;           //distance matrix 
+
+}
+
+parameters{
+
+  vector[P] beta;              //regression parameters
+  real<lower=0,upper=1> rho;   //spatial dependence
+  //real a[N];                   //plant effects
+  //real<lower=0> sigma;         //variation of plant effects
+
+}
+
+transformed parameters{
+
+  matrix[N,N] W;
+  vector[N] W_sum;
+  matrix[N,N] M;
+  cov_matrix[N] Sigma;
+  
+  W = make_W(N, beta, X);
+  
+  for(i in 1:N){
+    W_sum[i] = sum(W[i,]);
+  }
+  
+  M = diag_matrix(W_sum);
+  
+  Sigma = inverse((M - (rho*W)));
+
+}
+
+model{
+  
+//priors
+  beta ~ normal(0,1);
+  rho ~ uniform(0,1);
+  
+//likelihood
+  D ~ wishart(L, Sigma);
+
+
+}
+```

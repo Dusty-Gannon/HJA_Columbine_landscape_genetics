@@ -1,0 +1,114 @@
+---
+title: "Preparing landscape genetic data"
+author: "D. G. Gannon"
+date: "October 2020"
+output:
+  github_document:
+    pandoc_args: --webtex
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+  require(stringr)
+  require(vcfR)
+  require(tidyverse)
+  require(sp)
+  
+```
+
+
+Load vcf file with SNPs from presumably non-coding regions and convert genotype matrix into allelic load matrix ${\bf L}$, where $l_{ik}\in \{0,1,2\}$ for individual $i$ and locus $k$: 0 = for homozygous for the reference allele; 1 = heterozygous; 2 = homozygous for the alternative allele.
+
+```{r}
+ 
+  col_vcf <- read.vcfR("~/Documents/Columbine/Data/GBS_Data/AQFO_snps_nc.vcf")
+
+# Extract genotype matrix
+  col_gt <- extract.gt(col_vcf, element = "GT", as.numeric = F)
+  
+# Function to convert to allelic load
+  allele_load <-  function(x, sep="\\|"){
+    spl <- str_split(x, pattern = sep, n=2, simplify = T)
+    as.numeric(spl[,1])+as.numeric(spl[,2])
+  }
+  
+# convert to L matrix
+  col_ald <- apply(col_gt, 2, allele_load)
+  
+# rename rows and columns
+  rownames(col_ald) <- rownames(col_gt)
+  colnames(col_ald) <- colnames(col_gt)
+  
+# Put Individuals in rows and allelic load in columns
+  col_ald <- t(col_ald)
+  
+```
+
+$~$
+
+Create a mean-centered allelic loading matrix $\tilde {\bf L}$.
+
+```{r}
+
+  col_aldc <- apply(col_ald, 2, function(x){x-mean(x)})
+
+```
+
+
+$~$
+
+  Merge population data with the allelic load matrix to make sure rows are ordered correctly:
+  
+  
+```{r}
+ 
+  col_ald_df <- as.data.frame(col_aldc) # make into df for merge
+    col_ald_df <- cbind(rownames(col_ald_df), col_ald_df)
+    names(col_ald_df)[1] <- "Sample"
+
+  samp_dat <- read.table("~/Documents/Columbine/Data/sequenced_samples.txt", header = T, as.is = T, sep = "\t")
+
+  samp_dat_sub <- samp_dat[, c("Sample", "COMPLEX", "MEADOW_ID",
+                               "MEADOW_AREA", "PROP_FOREST_100",
+                               "X_COORD", "Y_COORD", "PL_IN_5M", "COVER",
+                               "FLW_STATUS")]
+  
+  col_dat <- merge(samp_dat_sub, col_ald_df)
+  
+  col_dat <- col_dat[order(col_dat$COMPLEX, col_dat$MEADOW_ID), ]
+  
+```
+
+Compute "node" centers by averaging the coordinates of plants sampled in each subpopulation (meadow).
+
+```{r}
+
+# find node centers
+  node_cents <- group_by(col_dat, MEADOW_ID) %>% 
+                  summarise(., n=n(), node_x=mean(X_COORD), node_y=mean(Y_COORD))
+# merge back in
+  col_dat <- merge(col_dat, node_cents[,-2], by="MEADOW_ID")
+  
+# reorder to put GT matrix at the right of all the other variables
+  col_dat <- col_dat[,c(2,3,1, ncol(col_dat)-1,
+                        ncol(col_dat), 4:ncol(col_dat)-2)]
+  
+
+```
+
+
+$~$
+
+We now create a 'spatial lines' object to extract the amount of forest on the Euclidean line between two nodes.
+
+```{r}
+
+  
+
+```
+
+
+
+
+

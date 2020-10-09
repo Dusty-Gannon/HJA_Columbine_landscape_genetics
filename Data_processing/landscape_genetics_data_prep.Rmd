@@ -104,6 +104,37 @@ We now create a 'spatial lines' object to extract the amount of forest on the Eu
 
 ```{r}
 
+# number of meadows
+  num_meads <- nrow(node_cents)
+
+# create list to store start-end coords
+  node_connects <- vector(mode = "list")
+
+for(i in 1:num_meads){
+  if(i < num_meads){
+    for(j in (i+1):num_meads){
+      coords <- as.matrix(rbind(node_cents[i, c("node_x","node_y")],
+                                node_cents[j, c("node_x","node_y")]))
+      nm <- paste(node_cents$MEADOW_ID[i], node_cents$MEADOW_ID[j],
+                sep = "-")
+      node_connects[[nm]] <- coords
+    }
+  }
+}  
+  
+#convert to lines
+  node_connects_l <- map(node_connects, ~Line(.))
+  
+# function to extract the names and convert to lines object
+  
+  
+  node_connects_ls <- map(node_connects_l, ~Lines(., ID=names(.)))
+  
+# define CRS
+  hja_crs <- CRS("+proj=utm +zone=10 +ellps=WGS84 +datum=WGS84 +units=m +no_defs")
+
+# create one spatial lines object
+  node_connects_spl <- SpatialLines(node_connects, proj4string = hja_crs)
   
 
 ```

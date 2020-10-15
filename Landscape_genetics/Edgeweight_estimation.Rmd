@@ -23,7 +23,7 @@ We have SNP data on $n=192$ *Aquilegia formosa* individuals from XX meadows, whi
 Letting $\tilde{\bf L}$ be the column-centered loadings matrix (i.e. $\tilde l_{ik} = l_{ik} - \bar{l}_{\cdot k}$, where $\bar{l}_{\cdot k}$ is the average loading at position $k$), we compute ${\bf D}$ as
 
 $$
-{\bf D} = \text{diag}({\bf G}){\bf 1}' - 2{\bf G} + \text{diag}({\bf G}){\bf 1}',
+{\bf D} = {\bf 1}\text{diag}({\bf G})' - 2{\bf G} + \text{diag}({\bf G}){\bf 1}',
 $$
 
 where ${\bf G} = \tilde{\bf L}^\text{T} \tilde{\bf L}$ and ${\bf 1}$ is an $n$-dimensional vector of ones.

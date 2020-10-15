@@ -1,31 +1,24 @@
----
-title: "Preparing landscape genetic data"
-author: "D. G. Gannon"
-date: "October 2020"
-output:
-  github_document:
-    pandoc_args: --webtex
----
-
-```{r setup, include=FALSE}
-knitr::opts_chunk$set(echo = TRUE, eval = FALSE)
-
-  require(stringr)
-  require(vcfR)
-  require(tidyverse)
-  require(sp)
-  require(raster)
-  
-```
+Preparing landscape genetic data
+================
+D. G. Gannon
+October 2020
 
 ## Load relevant data
 
 #### Load genetic data
 
-Load vcf file with SNPs from presumably non-coding regions and convert genotype matrix into allelic load matrix ${\bf L}$, where $l_{ik}\in \{0,1,2\}$ for individual $i$ and locus $k$: 0 = for homozygous for the reference allele; 1 = heterozygous; 2 = homozygous for the alternative allele.
+Load vcf file with SNPs from presumably non-coding regions and convert
+genotype matrix into allelic load matrix ![{\\bf
+L}](https://latex.codecogs.com/png.latex?%7B%5Cbf%20L%7D "{\\bf L}"),
+where ![l\_{ik}\\in
+\\{0,1,2\\}](https://latex.codecogs.com/png.latex?l_%7Bik%7D%5Cin%20%5C%7B0%2C1%2C2%5C%7D
+"l_{ik}\\in \\{0,1,2\\}") for individual
+![i](https://latex.codecogs.com/png.latex?i "i") and locus
+![k](https://latex.codecogs.com/png.latex?k "k"): 0 = for homozygous for
+the reference allele; 1 = heterozygous; 2 = homozygous for the
+alternative allele.
 
-```{r}
- 
+``` r
   col_vcf <- read.vcfR("~/Documents/Columbine/Data/GBS_Data/AQFO_snps_nc.vcf")
 
 # Extract genotype matrix
@@ -46,27 +39,21 @@ Load vcf file with SNPs from presumably non-coding regions and convert genotype 
   
 # Put Individuals in rows and allelic load in columns
   col_ald <- t(col_ald)
-  
 ```
 
-$~$
+![\~](https://latex.codecogs.com/png.latex?~ "~")
 
-#### Create a mean-centered allelic loading matrix $\tilde {\bf L}$.
+#### Create a mean-centered allelic loading matrix ![\\tilde {\\bf L}](https://latex.codecogs.com/png.latex?%5Ctilde%20%7B%5Cbf%20L%7D "\\tilde {\\bf L}").
 
-```{r}
-
+``` r
   col_aldc <- apply(col_ald, 2, function(x){x-mean(x)})
-
 ```
 
-
-$~$
+![\~](https://latex.codecogs.com/png.latex?~ "~")
 
 #### Load field data collected on individual plants and meadows
-  
-  
-```{r}
- 
+
+``` r
 # convert to dataframe
   col_ald_df <- as.data.frame(col_aldc) 
     col_ald_df <- cbind(rownames(col_ald_df), col_ald_df)
@@ -88,38 +75,34 @@ $~$
 # sort by complex then meadow
   col_popgen_data <- col_popgen_data[order(col_popgen_data$COMPLEX, 
                                            col_popgen_data$MEADOW_ID), ]
-  
 ```
 
-#### Compute "node" data 
+#### Compute “node” data
 
-We define node locations by averaging the coordinates of plants sampled in each subpopulation (meadow).
+We define node locations by averaging the coordinates of plants sampled
+in each subpopulation (meadow).
 
-```{r}
-
+``` r
 # find node centers
   node_data <- group_by(samp_dat_sub, MEADOW_ID) %>% 
                   summarise(., n=n(), node_x=mean(X_COORD), node_y=mean(Y_COORD),
                             plant_density=mean(PL_IN_5M), mean_cover=mean(COVER),
                             meadow_area=mean(MEADOW_AREA),
                             forest_100m=mean(PROP_FOREST_100))
-
 ```
 
-
-$~$
+![\~](https://latex.codecogs.com/png.latex?~ "~")
 
 ## Compute landscape variables of interest
 
-#### Amount of intervening forest 
+#### Amount of intervening forest
 
+**Create spatial lines object**
 
-**Create spatial lines object** 
+The spatial lines object will include a line between all pairs of
+“nodes”.
 
-The spatial lines object will include a line between all pairs of "nodes".
-
-```{r}
-
+``` r
 # number of meadows
   num_meads <- nrow(node_data)
 
@@ -151,31 +134,26 @@ for(i in 1:num_meads){
 
 # create one spatial lines object
   node_connects_spl <- SpatialLines(node_connects_ls, proj4string = hja_crs)
-  
-
 ```
 
-$~$
+![\~](https://latex.codecogs.com/png.latex?~ "~")
 
 **Extract the amount of forest between each node**
 
-```{r}
-
+``` r
   forest <- raster("~/Documents/Columbine/Data/GIS_Data/forest.tif")
   
 # extract proportion of forest between the nodes
   prop_for <- extract(forest, node_connects_spl, fun=mean, na.rm=T, buffer=100,
                       df=T)
   prop_for$ID <- names(node_connects_spl)
-
 ```
-
 
 #### Pairwise covariate data
 
 **Create a pairwise list for relevant data**
 
-```{r}
+``` r
   pw_data <- cbind(str_split(prop_for$ID, pattern = "-",
                                        n=2, simplify = T), 
                    prop_for)
@@ -209,16 +187,13 @@ $~$
   pw_data <- pw_data[,c(2,1,3:ncol(pw_data))]
   pw_data_byrow <- pw_data[order(pw_data$meadow_i, pw_data$meadow_j), ]
   pw_data_bycol <- pw_data[order(pw_data$meadow_j, pw_data$meadow_i), ]
-
 ```
 
-
-$~$
+![\~](https://latex.codecogs.com/png.latex?~ "~")
 
 **Compute the geographic distance between all pairs of nodes**
 
-```{r}
-
+``` r
 # create coordinate matrix
   coords <- as.matrix(node_data[,names(node_data)%in%c("node_x", "node_y")])
   rownames(coords) <- node_data$MEADOW_ID
@@ -233,17 +208,23 @@ $~$
 # compute distance matrix
   gdist_mat <- sqrt(gdist2(coords))/1000
   rownames(gdist_mat) <- colnames(gdist_mat)
-
 ```
 
-$~$
+![\~](https://latex.codecogs.com/png.latex?~ "~")
 
-#### Stack covariate matrices for covariate array, ${\bf X}$
+#### Stack covariate matrices for covariate array, ![{\\bf X}](https://latex.codecogs.com/png.latex?%7B%5Cbf%20X%7D "{\\bf X}")
 
-The covariate array, $X_{(m\times m \times P)}$, is the 3-dimensional array with $m \times m$ matrix slices, where $m$ is the number of nodes (meadows), that contain covariate data of $P$ covariates. For example, one slice is the geographic distance matrix between nodes.
+The covariate array, ![X\_{(m\\times m \\times
+P)}](https://latex.codecogs.com/png.latex?X_%7B%28m%5Ctimes%20m%20%5Ctimes%20P%29%7D
+"X_{(m\\times m \\times P)}"), is the 3-dimensional array with ![m
+\\times m](https://latex.codecogs.com/png.latex?m%20%5Ctimes%20m
+"m \\times m") matrix slices, where
+![m](https://latex.codecogs.com/png.latex?m "m") is the number of nodes
+(meadows), that contain covariate data of
+![P](https://latex.codecogs.com/png.latex?P "P") covariates. For
+example, one slice is the geographic distance matrix between nodes.
 
-```{r}
-
+``` r
 # for the symmetric matrices (distance and proportion intervening forest),
 #  write function to fill in matrix based on vector of values
   fillMat_sym <- function(x, rows, cols, upper=T){
@@ -312,37 +293,56 @@ The covariate array, $X_{(m\times m \times P)}$, is the 3-dimensional array with
   X[,,"mean_cover_j"] <- X[,,"mean_cover_j"]/100
   X[,,"meadow_area_i"] <- log(X[,,"meadow_area_i"])
   X[,,"meadow_area_j"] <- log(X[,,"meadow_area_j"])
-
 ```
 
-$~$
+![\~](https://latex.codecogs.com/png.latex?~ "~")
 
-## Compute squared genetic distance matrix ${\bf D}$
+## Compute squared genetic distance matrix ![{\\bf D}](https://latex.codecogs.com/png.latex?%7B%5Cbf%20D%7D "{\\bf D}")
 
-```{r}
-  
+``` r
   col_aldc_sort <- as.matrix(col_popgen_data[,-c(1:3)])
   row.names(col_aldc_sort) <- col_popgen_data$Sample
   
   D <- gdist2(col_aldc_sort)
-
 ```
 
+![\~](https://latex.codecogs.com/png.latex?~ "~")
 
-$~$
+## Define the ![K](https://latex.codecogs.com/png.latex?K "K") matrix
 
-## Define the $K$ matrix
+The ![K](https://latex.codecogs.com/png.latex?K "K") matrix maps the
+![n](https://latex.codecogs.com/png.latex?n "n") individual samples
+(plants) to the ![m](https://latex.codecogs.com/png.latex?m "m") nodes
+(meadows), for which we estimate the precision matrix ![{\\bf
+Q}](https://latex.codecogs.com/png.latex?%7B%5Cbf%20Q%7D "{\\bf Q}").
+Thus, the scale matrix for the Wishart model, ![\\boldsymbol
+\\Psi\_{(n\\times
+n)}](https://latex.codecogs.com/png.latex?%5Cboldsymbol%20%5CPsi_%7B%28n%5Ctimes%20n%29%7D
+"\\boldsymbol \\Psi_{(n\\times n)}"), becomes
 
-The $K$ matrix maps the $n$ individual samples (plants) to the $m$ nodes (meadows), for which we estimate the precision matrix ${\bf Q}$. Thus, the scale matrix for the Wishart model, $\boldsymbol \Psi_{(n\times n)}$, becomes
+  
+![&#10;\\boldsymbol \\Psi = {\\bf K}{\\bf Q}^{-1}{\\bf K}' +
+\\tau^2{\\bf
+I},&#10;](https://latex.codecogs.com/png.latex?%0A%5Cboldsymbol%20%5CPsi%20%3D%20%7B%5Cbf%20K%7D%7B%5Cbf%20Q%7D%5E%7B-1%7D%7B%5Cbf%20K%7D%27%20%2B%20%5Ctau%5E2%7B%5Cbf%20I%7D%2C%0A
+"
+\\boldsymbol \\Psi = {\\bf K}{\\bf Q}^{-1}{\\bf K}' + \\tau^2{\\bf I},
+")  
 
-$$
-\boldsymbol \Psi = {\bf K}{\bf Q}^{-1}{\bf K}' + \tau^2{\bf I},
-$$
+where ![{\\bf K}\_{(n\\times
+m)}](https://latex.codecogs.com/png.latex?%7B%5Cbf%20K%7D_%7B%28n%5Ctimes%20m%29%7D
+"{\\bf K}_{(n\\times m)}") is a matrix of
+![n](https://latex.codecogs.com/png.latex?n "n") rows for the
+![n](https://latex.codecogs.com/png.latex?n "n") samples and
+![m](https://latex.codecogs.com/png.latex?m "m") columns for the
+![m](https://latex.codecogs.com/png.latex?m "m") nodes, ![{\\bf
+I}\_{(n\\times
+n)}](https://latex.codecogs.com/png.latex?%7B%5Cbf%20I%7D_%7B%28n%5Ctimes%20n%29%7D
+"{\\bf I}_{(n\\times n)}") is the
+rank-![n](https://latex.codecogs.com/png.latex?n "n") identity matrix,
+and ![\\tau^2](https://latex.codecogs.com/png.latex?%5Ctau%5E2
+"\\tau^2") is the process variation.
 
-where ${\bf K}_{(n\times m)}$ is a matrix of $n$ rows for the $n$ samples and $m$ columns for the $m$ nodes, ${\bf I}_{(n\times n)}$ is the rank-$n$ identity matrix, and $\tau^2$ is the process variation.
-
-```{r}
-
+``` r
 # define empty matrix
   K <- matrix(0, nrow = dim(D)[1], ncol = dim(X)[1])
   colnames(K) <- node_data_sort$MEADOW_ID
@@ -356,29 +356,12 @@ where ${\bf K}_{(n\times m)}$ is a matrix of $n$ rows for the $n$ samples and $m
     K[mappings,i] <- 1
     
   }
-
-
 ```
-
 
 **Save all these data as they are formatted now**
 
-```{r}
-
+``` r
   save(samp_dat_sub, node_data_sort, 
        col_popgen_data, pw_data, X, K, D,
        file = "~/Documents/Columbine/Data/GBS_Data/spatial_weights_estimation.RData")
-
 ```
-
-
-
-
-
-
-
-
-
-
-
-

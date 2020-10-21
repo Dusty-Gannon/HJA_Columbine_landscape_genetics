@@ -41,10 +41,8 @@
   SGE_Batch -c "gstacks -I /raid1/home/bpp/gannondu/HJA_Columbine/alignments_round2/bwa/ -M /raid1/home/bpp/gannondu/HJA_Columbine/stacks_round2/popmap_round2.tsv -O /raid1/home/bpp/gannondu/HJA_Columbine/stacks_round2/ -t 16 --min-mapq 20" -r gstacks -P 16
 
 # Stacks populations
-  #merge loci at adjacent cut sites
-  #1 random snp per locus
-  #snps must be present in 85% of samples in a population, and all four populations
-  SGE_Batch -c "populations -P /raid1/home/bpp/gannondu/HJA_Columbine/stacks_round2/ -O /raid1/home/bpp/gannondu/HJA_Columbine/stacks_round2/populations_r80merge/ -M /raid1/home/bpp/gannondu/HJA_Columbine/stacks_round2/popmap_round2.tsv -t 16 -r 0.85 -p 4 --write-random-snp --merge-sites -e apeKI --vcf --ordered-export" -r populations1 -P 16
+  #snps must be present in 80% of samples in a population, maf >= 0.05
+  SGE_Batch -c "populations -P /raid1/home/bpp/gannondu/HJA_Columbine/stacks_round2/ -O /raid1/home/bpp/gannondu/HJA_Columbine/stacks_round2/populations_R80/ -M /raid1/home/bpp/gannondu/HJA_Columbine/stacks_round2/popmap_round2.tsv -t 16 -R 0.8 --min-maf 0.05 -e apeKI --vcf --ordered-export" -r populations1 -P 16
 
 ##########################################################################################
 

@@ -2,7 +2,9 @@
 title: "SNP filtering using vcfR"
 author: "D. G. Gannon"
 date: "September 2020"
-output: pdf_document
+output:
+  github_document:
+    pandoc_args: --webtex
 bibliography: /Users/dusty/Documents/zotero_library.bib
 header-includes:
   \usepackage{setspace}
@@ -14,6 +16,7 @@ knitr::opts_chunk$set(echo = TRUE)
 
   require(vcfR)
   require(stringr)
+  require(dplyr)
 
 ```
 
@@ -25,33 +28,27 @@ knitr::opts_chunk$set(echo = TRUE)
   
   3) Catalog phase: Discard alignments with Phred scores < 20 (i.e. only keep alignments for which $\text{Pr}(\text{Incorrect alignment} < 0.01)$; \texttt{gstacks} program)
   
-  4) Genotyping: Loci must be present in at least 85% of individuals per population and all four populations (meadow complexes) sampled
+  4) Genotyping: Loci must be present in at least 80% of individuals sampled and have a minor allele frequency of at least 0.05
   
   5) Locus filters: vcf file is filtered to include only bi-allelic loci using \texttt{vcftools}.
   
   
 
 ```{bash, eval=FALSE}
-  vcftools --vcf ./AQFO_snps_r80.vcf --min-alleles 2 --max-alleles 2 --recode --recode-INFO-all \
-  --out ./AQFO_snps_r80_bi
+  vcftools --vcf ./AQFO_snps_R80.vcf --min-alleles 2 --max-alleles 2 --recode --recode-INFO-all \
+  --out ./AQFO_snps_R80_bi
 ```
 
 
-\subsubsection{Filtering SNPs based on depth}
+### Filtering SNPs based on depth
 
-  Repetitive or similar regions in the genome may result in reads that come from different locations in the genome getting erroneously merged and aligned. This can result in exceptionally deep coverage on certain loci and could result in spurious SNP calls. We use the effective per-sample coverage reported from the \texttt{gstacks} of \texttt{Stacks v2} to create a depth threshold. We set the depth threshold, $d^*$, as
+  Repetitive or similar regions in the genome may result in reads that come from different locations in the genome getting erroneously merged and aligned. This can result in exceptionally deep coverage on certain loci and could result in spurious SNP calls. We set a depth threshold for snps as the $99^\text{th}$ percentile of the empirical distribution of mean SNP depth across samples. This is based on the quantile plot in Figure 1 where one can see that a few SNPs have extremely high coverage.
   
-$$
-0.0001 = 1-P(d_{ij} \le d_i^*\ |\ \lambda_i),
-$$
-where, $\lambda_i$ is the reported effective coverage for sample $i$ from the \texttt{gstacks} program, $d_{ij}$ is the depth at locus $j$ for sample $i$, and 
-$P(\cdot)$ is computed based on the Poisson PMF with rate parameter $\lambda_i$.
-
   We do not remove SNPs with low depth because the model that calls genotypes in \texttt{Stacks v2} avoids calling genotypes when uncertainty in the call is high [@maruki2017]. 
   
 ```{r, message=FALSE, include=FALSE}
 
-  col.vcf <- read.vcfR("~/Documents/Columbine/Data/GBS_Data/AQFO_snps_r80_bi.vcf")
+  col.vcf <- read.vcfR("~/Documents/Columbine/Data/GBS_Data/AQFO_snps_R80_bi.vcf")
 
   coverage <- read.table("~/Documents/Columbine/Data/GBS_Data/coverage_per_sample.txt", header = T, 
                          sep = "\t", as.is = T)
@@ -59,51 +56,55 @@ $P(\cdot)$ is computed based on the Poisson PMF with rate parameter $\lambda_i$.
 ```
 
 
-```{r depth filters}
+```{r mean depth}
 
   dp <- extract.gt(col.vcf, element = "DP", as.numeric = T)
 
-# Replace exceedingly high read depths with NAs in depth matrix
-  quants <- qpois(0.0001, lambda = coverage$mean_cov_ns, lower.tail = F)
+  # heatmap.bp(dp, rlabels = F, clabels = F)
   
-  dp2 <- sweep(dp, MARGIN = 2, STATS = quants, FUN = "-")
+  mean_dp_snps <- apply(dp, 1, mean, na.rm=T)
   
-  dp[dp2 > 0] <- NA
-
+  plot(log(quantile(mean_dp_snps, probs=c(seq(0,1, by=0.01)))),
+       xlab="quantile", ylab="log(depth)")
 ```
 
+**Figure 1**: Empirical CDF of the mean depth across samples for each SNP.
 
+```{r }
+# Remove snps that have extremely high average read depths
+ # what value represents the 98% quantile?
+  quant <- quantile(mean_dp_snps, probs=0.99)
 
-```{r missingness filter}
-
-#Filter out the snps with lots of missing data
-
-  miss_snp <- apply(dp, MARGIN = 1, function(x){ sum( is.na(x) ) } )
-  miss_snp <- miss_snp / ncol(dp)
-  col.vcf.good <- col.vcf[miss_snp <= 0.05, ]
+# list the snps which have an average depth above the 98% quantile
+  snps2_rmv <- which(mean_dp_snps > quant)
   
+# we also want to remove snps without any neighbors
+#  for the sake of imputation
+  snps_per_chrom <- as.data.frame(col.vcf@fix) %>% group_by(., CHROM) %>%
+    summarise(n=n())
   
+  scaffs2_rmv <- snps_per_chrom$CHROM[which(snps_per_chrom$n == 1)]
+  snps2_rmv <- c(snps2_rmv, 
+                 which(col.vcf@fix[,1] %in% scaffs2_rmv))
+  
+  site2rm <- col.vcf@fix[snps2_rmv, 3]
 
-# get a list of snp id's to remove
-  
-  site2rm <- col.vcf@fix[miss_snp > 0.05, 3]
-  
- #  write.table(site2rm, "~/Documents/Columbine/Data/GBS_Data/exclude_sites.txt", 
- #              quote = F, sep = "\t",
- #            row.names = F, col.names = F)
-
+  # write.table(site2rm, "~/Documents/Columbine/Data/GBS_Data/exclude_sites.txt",
+  #             quote = F, sep = "\t",
+  #           row.names = F, col.names = F)
   
 ```
+
 
 $~$
 
-Using the list of SNPs to exclude, we use vcftools to rewrite the vcf file with only the loci we wish to keep.
+Using the list of SNPs to exclude, we use vcftools to rewrite the vcf file with only the loci we wish to keep. We do not use `vcfR` to do this, as BEAGLE does not recognize files written using `vcfR`.
 
 $~$
  
  
 ```{bash, eval=FALSE}
-  vcftools --vcf ./AQFO_snps_r80_bi.vcf --exclude ./exclude_sites.txt --recode --recode-INFO-all \ 
+  vcftools --vcf ./AQFO_snps_R80_bi.vcf --exclude ./exclude_sites.txt --recode --recode-INFO-all \
   --out ./AQFO_snps_postfilt
 ```
 
@@ -113,34 +114,29 @@ $~$
 ```{r, include=FALSE}
   
   col.vcf.good <- read.vcfR("~/Documents/Columbine/Data/GBS_Data/AQFO_snps_postfilt.vcf")
+  col_gt <- extract.gt(col.vcf.good, element = "GT")
   
 ```
 
 
 
-```{r}
-
-  dp.good <- extract.gt(col.vcf.good, element = "DP", as.numeric = T)
-  col.gt <- extract.gt(col.vcf.good, element = "GT")
-  
-  heatmap.bp(dp.good, rlabels = F)
-
-```
-**Figure 1** Heatmap of sequencing depth across the filtered dataset.
-
-
- With this vcf file containing `r round(sum(is.na(col.gt))/(nrow(col.gt)*ncol(col.gt)),4)*100` percent missing information, `r dim(dp.good)[1]` SNPs and 192 individual plants, we impute the missing genotypes using \texttt{BEAGLE} [@browning2016].
+ With this vcf file containing `r round(sum(is.na(col_gt))/(nrow(col_gt)*ncol(col_gt)),4)*100` percent missing information, `r dim(col_gt)[1]` SNPs and 192 individual plants, we impute the missing genotypes using BEAGLE [@browning2016].
  
+ 
+```{bash eval=FALSE}
+# running BEAGLE through the terminal
+  java -Xmx8g -jar ./beagle.25Nov19.28d.jar gt=AQFO_snps_postfilt.vcf out=AQFO_snps_impute nthreads=2
+```
 $~$
 
-\subsubsection{Filtering SNPs based on exon annotations}
+### Filtering SNPs based on exon annotations
 
 Read in the annotations file from the *A. coerulea* genome and store as a dataframe.
 
 ```{r annotations}
 
 # read in the imputed vcf
-  col.vcf.good <- read.vcfR(file = "~/Documents/Columbine/Data/GBS_Data/AQFO_snsp_impute.vcf")
+  col_vcf_gdimp <- read.vcfR(file = "~/Documents/Columbine/Data/GBS_Data/AQFO_snps_impute.vcf")
   ann <- read.table("~/Documents/Columbine/Data/GBS_Data/Acoerulea_322_v3.1.gene_exons.gff3",
                     header = F, sep = "\t", as.is = T)[,c(1,3:5,7)]
 
@@ -154,7 +150,7 @@ Read in the annotations file from the *A. coerulea* genome and store as a datafr
 
 ```{r annotate, eval=FALSE}
 # annotate snps
-  snps <- as.data.frame(col.vcf.good@fix)
+  snps <- as.data.frame(col_vcf_gdimp@fix)
   snps$POS <- as.numeric(snps$POS)
   snps$strand <- str_split(snps$ID, ":", simplify = T)[,3]
   snps$SOFA <- NA
@@ -162,8 +158,7 @@ Read in the annotations file from the *A. coerulea* genome and store as a datafr
   for(i in 1:nrow(snps)){
     annots_i <- which((ann$Chrom == snps$CHROM[i]) &
            (ann$start < snps$POS[i]) &
-            (ann$stop > snps$POS[i]) &
-            ann$strand == snps$strand[i])
+            (ann$stop > snps$POS[i]))
     if(length(annots_i) == 1){
       snps$SOFA[i] <- ann$annot[annots_i]
     } else if(length(annots_i) > 1){
@@ -175,11 +170,11 @@ Read in the annotations file from the *A. coerulea* genome and store as a datafr
   
 # create "neutral" vcf
   
-  col.vcf.nc <- col.vcf.good[which(snps$SOFA == "NC"), ]
-  col.vcf.cd <- col.vcf.good[which(snps$SOFA != "NC"), ]
+  col_vcf_nc <- col_vcf_gdimp[which(snps$SOFA == "NC"), ]
+  col_vcf_cd <- col_vcf_gdimp[which(snps$SOFA != "NC"), ]
   
-  write.vcf(col.vcf.nc, file = "~/Documents/Columbine/Data/GBS_Data/AQFO_snps_nc.vcf")
-  write.vcf(col.vcf.cd, file = "~/Documents/Columbine/Data/GBS_Data/AQFO_snps_cd.vcf")
+  # write.vcf(col_vcf_nc, file = "~/Documents/Columbine/Data/GBS_Data/AQFO_snps_nc.vcf")
+  # write.vcf(col_vcf_cd, file = "~/Documents/Columbine/Data/GBS_Data/AQFO_snps_cd.vcf")
   
 ```
 

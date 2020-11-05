@@ -8,6 +8,6 @@ Experimental forest. It includes a folder with
   - code used to process and prepare the genomic data
     (*Data\_processing*)
   - code used to conduct the landscape genetics analysis
-    (*LS\_Genetics*)
+    (*Landscape\_Genetics*)
   - code used to analyze seed set data (*Seed\_sets*)
   - code for the analysis of pollen analog dispersal (*Dye\_dispersal*).

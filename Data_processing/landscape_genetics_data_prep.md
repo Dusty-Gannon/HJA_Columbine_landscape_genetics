@@ -8,45 +8,41 @@ October 2020
 #### Load genetic data
 
 Load vcf file with SNPs from presumably non-coding regions and convert
-genotype matrix into allelic load matrix ![{\\bf
-L}](https://latex.codecogs.com/png.latex?%7B%5Cbf%20L%7D "{\\bf L}"),
-where ![l\_{ik}\\in
-\\{0,1,2\\}](https://latex.codecogs.com/png.latex?l_%7Bik%7D%5Cin%20%5C%7B0%2C1%2C2%5C%7D
-"l_{ik}\\in \\{0,1,2\\}") for individual
+genotype matrix into allelic frequency matrix ![{\\bf
+F}](https://latex.codecogs.com/png.latex?%7B%5Cbf%20F%7D "{\\bf F}"),
+where ![f\_{ik}\\in
+\\{0,0.5,1\\}](https://latex.codecogs.com/png.latex?f_%7Bik%7D%5Cin%20%5C%7B0%2C0.5%2C1%5C%7D
+"f_{ik}\\in \\{0,0.5,1\\}") for individual
 ![i](https://latex.codecogs.com/png.latex?i "i") and locus
-![k](https://latex.codecogs.com/png.latex?k "k"): 0 = for homozygous for
-the reference allele; 1 = heterozygous; 2 = homozygous for the
-alternative allele.
+![k](https://latex.codecogs.com/png.latex?k "k"): 1 = homozygous for the
+randomly selected reference allele; 0.5 = heterozygous; 0 = homozygous
+for the alternative allele.
 
 ``` r
   col_vcf <- read.vcfR("~/Documents/Columbine/Data/GBS_Data/AQFO_snps_nc.vcf")
 
 # Extract genotype matrix
-  col_gt <- extract.gt(col_vcf, element = "GT", as.numeric = F)
+  col_gt <- t(extract.gt(col_vcf, element = "GT", as.numeric = F))
   
-# Function to convert to allelic load
-  allele_load <-  function(x, sep="\\|"){
+# Function to convert to allelic covariance
+  allele_freq_random_ref <-  function(x, sep="\\|"){
     spl <- str_split(x, pattern = sep, n=2, simplify = T)
-    as.numeric(spl[,1])+as.numeric(spl[,2])
+    spl_num <- apply(spl, 2, as.numeric)
+    random_ref <- as.numeric(rbernoulli(1,p=0.5))
+    apply(spl_num, 1, function(x){mean(x==random_ref)})
   }
   
-# convert to L matrix
-  col_ald <- apply(col_gt, 2, allele_load)
-  
-# rename rows and columns
-  rownames(col_ald) <- rownames(col_gt)
-  colnames(col_ald) <- colnames(col_gt)
-  
-# Put Individuals in rows and allelic load in columns
-  col_ald <- t(col_ald)
+  col_alfreq <- apply(col_gt,2, allele_freq_random_ref)
+  rownames(col_alfreq) <- rownames(col_gt)
 ```
 
 ![\~](https://latex.codecogs.com/png.latex?~ "~")
 
-#### Create a mean-centered allelic loading matrix ![\\tilde {\\bf L}](https://latex.codecogs.com/png.latex?%5Ctilde%20%7B%5Cbf%20L%7D "\\tilde {\\bf L}").
+#### Create allelic covariance matrix ![\\hat{\\boldsymbol \\Omega}](https://latex.codecogs.com/png.latex?%5Chat%7B%5Cboldsymbol%20%5COmega%7D "\\hat{\\boldsymbol \\Omega}").
 
 ``` r
-  col_aldc <- apply(col_ald, 2, function(x){x-mean(x)})
+  col_alfreq_cent <- col_alfreq - 0.5
+  col_alcov <- (col_alfreq_cent%*%t(col_alfreq_cent))/ncol(col_alfreq_cent)
 ```
 
 ![\~](https://latex.codecogs.com/png.latex?~ "~")
@@ -55,9 +51,9 @@ alternative allele.
 
 ``` r
 # convert to dataframe
-  col_ald_df <- as.data.frame(col_aldc) 
-    col_ald_df <- cbind(rownames(col_ald_df), col_ald_df)
-    names(col_ald_df)[1] <- "Sample"
+  col_alfreq_df <- as.data.frame(col_alfreq) 
+    col_alfreq_df <- cbind(rownames(col_alfreq_df), col_alfreq_df)
+    names(col_alfreq_df)[1] <- "Sample"
 
 # load sample data
   samp_dat <- read.table("~/Documents/Columbine/Data/sequenced_samples.txt", header = T, as.is = T, sep = "\t")
@@ -70,7 +66,7 @@ alternative allele.
   
  # merge population variables with L matrix
   col_popgen_data <- merge(samp_dat_sub[,c("Sample", "COMPLEX", "MEADOW_ID")], 
-                           col_ald_df)
+                           col_alfreq_df)
   
 # sort by complex then meadow
   col_popgen_data <- col_popgen_data[order(col_popgen_data$COMPLEX, 
@@ -362,6 +358,6 @@ and ![\\tau^2](https://latex.codecogs.com/png.latex?%5Ctau%5E2
 
 ``` r
   save(samp_dat_sub, node_data_sort, 
-       col_popgen_data, pw_data, X, K, D,
+       col_popgen_data, pw_data, X, K, col_alcov,
        file = "~/Documents/Columbine/Data/GBS_Data/spatial_weights_estimation.RData")
 ```

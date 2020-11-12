@@ -8,72 +8,86 @@ output:
 bibliography: /Users/dusty/Documents/zotero_library.bib
 ---
 
-```{r setup, include=FALSE}
+```{r setup, include=FALSE, warning=FALSE}
 knitr::opts_chunk$set(echo = TRUE)
 
   require(rstan)
   require(CholWishart)
+  require(ggplot2)
+  require(here)
+
+# functions
+  dist_matrix <- function(m){
+    n <- nrow(m)
+    ones <- rep(1,n)
+    Gmat <- m%*%t(m) 
+    diag_G <- diag(Gmat)
+    return(ones%*%t(diag_G) -2*Gmat + diag_G%*%t(ones))
+  }
 
 ```
 
 ### Data
 
-We have SNP data on $n=192$ *Aquilegia formosa* individuals from XX meadows, which we consider to be "sub-populations" of the H.J. Andrews *A. formosa* population. We work with a centered, euclidean distance matrix, ${\bf D}_{(n\times n)}$, computed from a genetic loading matrix $l_{(n\times \ell)}$, where $\ell$ is the number of SNP loci sequenced. Genetic loadings are coded as $l_{ik} = 0$ if individual $i$ is homozygous for the reference allele at locus $k$, $l_{ik}=1$ if individual $i$ has a heterozygous genotype at site $k$, and $l_{ik}=2$ if individual $i$ is homozygous with two copies of the alternative allele at site $k$. The data were previously filtered to include only bi-allelic loci. 
+We have SNP data on $n=192$ *Aquilegia formosa* individuals from 25 meadows, which we consider to be "sub-populations" of the H.J. Andrews *A. formosa* population. We work with the allelic scatter matrix ${\bf S}$ computed from an allelic frequency matrix $F_{(n\times \ell)}$, where $\ell$ is the number of SNP loci sequenced and $n$ is the number of plants sequenced. Allelic frequencies are coded as $f_{ik} = 0$ if individual $i$ is homozygous for the randomly selected reference allele at locus $k$, $f_{ik}=0.5$ if individual $i$ has a heterozygous genotype at site $k$, and $f_{ik}=1$ if individual $i$ is homozygous with two copies of the alternative allele at site $k$. The data were previously filtered to include only bi-allelic loci. 
 
-Letting $\tilde{\bf L}$ be the column-centered loadings matrix (i.e. $\tilde l_{ik} = l_{ik} - \bar{l}_{\cdot k}$, where $\bar{l}_{\cdot k}$ is the average loading at position $k$), we compute ${\bf D}$ as
+We compute ${\bf S}$ as
 
 $$
-{\bf D} = {\bf 1}\text{diag}({\bf G})' - 2{\bf G} + \text{diag}({\bf G}){\bf 1}',
+{\bf S} = \left({\bf F} - \frac{1}{2}{\bf J}_{(n\times \ell)}\right)\left({\bf F} - \frac{1}{2}{\bf J}_{(n\times \ell)}\right)',
 $$
 
-where ${\bf G} = \tilde{\bf L}^\text{T} \tilde{\bf L}$ and ${\bf 1}$ is an $n$-dimensional vector of ones.
+where ${\bf J}_{(n\times \ell)}$ is an all-ones matrix and $'$ denotes the matrix transpose. This definition is the matrix representation of the allelic covariance matrix defined in [@bradburd2018].
 
 ### Model
 
-We assume that $-{\bf D} \sim \text{Wishart}(1,\ 2{\boldsymbol \Sigma})$, where
+We assume that ${\bf S} \sim \text{Wishart}(\ell,\ {\boldsymbol \Sigma})$, where the number of SNP loci, $\ell$, is the degrees of freedom parameter and $\boldsymbol \Sigma$ is the scale matrix. To model spatial dependence among individual genotypes (i.e., isolation by distance [@wright1943] or isolation by resistance [@mcrae2006]), we let
 
 $$
 \boldsymbol{\Sigma} = ({\bf M} - \rho{\bf W})^{-1}.
 $$
 
-Above, ${\bf W}_{(n\times n)}$ is the weights matrix. It determines the degree of connectivity among nodes (individuals) in a spatial network and is the parameter of interest. The parameter ${\bf M}$ is a diagonal matrix with $m_{ii} = \sum_{j=1}^nw_{ij}$ and all off-diagonal elements equal to zero, and $\rho$ controls the amount of spatial autocorrelation among the genotypes of nearby individuals. We model the weight between individuals $i$ and $j$ as a log-linear combination of covariates and regression parameters such that
+Above, ${\bf W}_{(n\times n)}$ is the weights matrix. It determines the degree of connectivity among nodes (defined as plants here) in a spatial network and is the parameter of interest. The parameter ${\bf M}$ is a diagonal matrix with $m_{ii} = \sum_{j=1}^nw_{ij}$ and all off-diagonal elements equal to zero, and $\rho$ controls the amount of spatial autocorrelation among the genotypes of nearby individuals. We model the weight between subpopulations $i$ and $j$ as a log-linear combination of covariates and regression parameters such that
 
 $$
-w_{ij} = \exp\{{\bf x}_{ij}'\boldsymbol \beta + a_i\},
+w_{ij} = \exp\{{\bf x}_{ij}'\boldsymbol \beta\},
 $$
-where ${\bf x}_{ij}$ is a vector of covariates for individuals $i$ and $j$, $\boldsymbol \beta$ is a vector of regression parameters, and $a_i$ is an effect for the individual plant. We assume $a_1,a_2,...,a_n \sim \mathcal{N}(0,\sigma^2)$. Our covariates of interest are 
+where ${\bf x}_{ij}$ is a vector of covariates for individuals $i$ and $j$ and $\boldsymbol \beta$ is a vector of regression parameters. Our covariates of interest are 
 
 * geographic distance (km)
 * proportion of forested cells that intersect the Euclidean line between plants $i$ and $j$
+* interaction between distance and intervening forest
 * percent canopy cover for plant $i$
 * percent canopy cover for plant $j$
 * flowering plant density around plant $i$ (individuals/25$\pi \text{m}^2$)
 * flowering plant density around plant $j$ (individuals/25$\pi \text{m}^2$)
+* proportion of landscape that is forested within 100m of plant $i$
+* proportion of landscape that is forested within 100m of plant $j$
+
+
 
 ### Priors
 
-We assume the following weakly informative priors for the regression parameters, $\rho$, and $\sigma$:
+We assume the following weakly informative priors for the regression parameters and $\rho$:
 
 $$
 {\boldsymbol \beta} \sim \mathcal{N}({\bf 0}_P,\ {\bf I}_{(P\times P)}),
 $$
 
-$$
-\rho \sim \mathcal{U}(0,1),
-$$
-
 and
 
 $$
-\sigma \sim \text{half-Normal}(0,2).
+\rho \sim \mathcal{B}(2,2).
 $$
+
 
 #### Stan Model Code
 
 ```{stan output.var="wishart_edgeweight_model", eval=FALSE}
 
 functions{
-
+// function to make weights matrix from regression array X and
+// paramater vector v
   matrix make_W(int N, vector v, real[,,] X){
     matrix[N,N] W;
     for(i in 1:N){
@@ -82,7 +96,7 @@ functions{
         for(j in 1:(i-1)){
           W[i,i] = 0;
           W[i,j] = exp(to_row_vector(X[i,j,])*v);
-          W[j,i] = W[i,j];
+          W[j,i] = F[i,j];
         }
       }
     }
@@ -95,10 +109,10 @@ data{
 
   int<lower=1> N;          //number of individuals sampled
   int<lower=1> L;          //number of SNP loci
-  int<lower=1> P;          //number of landscape variables
+  int<lower=1> P;          //number of landscape and node variables
   
-  real X[N,N,P];        //design array
-  matrix[N,N] D;           //distance matrix 
+  real X[N,N,P];           //design array
+  matrix[N,N] S;           //scatter matrix 
 
 }
 
@@ -106,8 +120,7 @@ parameters{
 
   vector[P] beta;              //regression parameters
   real<lower=0,upper=1> rho;   //spatial dependence
-  //real a[N];                   //plant effects
-  //real<lower=0> sigma;         //variation of plant effects
+  //real<lower=0> tau;           //
 
 }
 
@@ -117,6 +130,7 @@ transformed parameters{
   vector[N] W_sum;
   matrix[N,N] M;
   cov_matrix[N] Sigma;
+  //matrix[N,N] Psi;
   
   W = make_W(N, beta, X);
   
@@ -134,16 +148,75 @@ model{
   
 //priors
   beta ~ normal(0,1);
-  rho ~ uniform(0,1);
+  rho ~ beta(2,2);
+
   
 //likelihood
-  D ~ wishart(L, Sigma);
-
+  S ~ wishart(L, Sigma);
 
 }
 
 ```
 
+
+### Loading data and fitting the model
+
+```{r, eval=FALSE}
+
+  load(here("Data", "Indiv_lndscp_gen.RData"))
+
+```
+
+Because we assume the weights matrix ${\bf W}$ is symmetric, we average the node-specific covariates. For example, rather than including an effect for the canopy cover at the location of plant $i$ and one for the canopy cover at plant $j$ for the linear predictor of $\log (w_{ij})$, we include a single effect for the average canopy cover at plant $i$ and $j$. We compile the predictors into a 3-dimensional array, ${\bf X}_{(n\times n \times P)}$, where $P$ is the number of covariates plus 1 (for the intercept).
+
+
+
+
+```{r, eval=FALSE, include=FALSE}
+
+  X_comb <- array(dim = c(dim(X)[c(1,2)],7))
+  X_comb[,,c(1:3)] <- X[,,c(1:3)]
+# now average them
+  X_comb[,,4] <- (X[,,"plant_density_i"] +
+    X[,,"plant_density_j"])/2
+  
+  X_comb[,,5] <- (X[,,"cover_i"]+
+                   X[,,"cover_j"])/2
+  
+  X_comb[,,6] <- (X[,,"meadow_area_i"]+
+                   X[,,"meadow_area_j"])/2
+  
+  X_comb[,,7] <- (X[,,"forest_100m_i"]+
+                   X[,,"forest_100m_j"])/2
+  
+  dimnames(X_comb)[[3]] <- c("intercept", "geo_dist_ij", "prop_forest_ij",
+                             "avg_pl_density_ij", "avg_cover_ij",
+                             "avg_meadow_size_ij", "avg_forest100_ij")
+
+
+```
+
+
+
+
+```{r eval=FALSE}
+
+  N <- dim(col_alscatter)[1]
+  num_covs <- dim(X_comb)[3]
+  num_snps <- dim(col_popgen_data)[2] - 3
+
+  mod_data <- list(N=N,
+                   P=num_covs,
+                   L=num_snps,
+                   X=X_comb,
+                   S=col_alscatter)
+  
+  mfit <- sampling(wishart_edgeweight_model,
+                   data=mod_data,
+                   iter=1000,
+                   chains=2)
+
+```
 
 
 

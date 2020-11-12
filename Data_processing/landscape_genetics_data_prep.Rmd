@@ -5,6 +5,7 @@ date: "October 2020"
 output:
   github_document:
     pandoc_args: --webtex
+bibliography: /Users/dusty/Documents/zotero_library.bib
 ---
 
 ```{r setup, include=FALSE}
@@ -22,41 +23,38 @@ knitr::opts_chunk$set(echo = TRUE, eval = FALSE)
 
 #### Load genetic data
 
-Load vcf file with SNPs from presumably non-coding regions and convert genotype matrix into allelic load matrix ${\bf L}$, where $l_{ik}\in \{0,1,2\}$ for individual $i$ and locus $k$: 0 = for homozygous for the reference allele; 1 = heterozygous; 2 = homozygous for the alternative allele.
+Load vcf file with SNPs from presumably non-coding regions and convert genotype matrix into an allelic frequency matrix ${\bf F}$, where $f_{ik}\in \{0,0.5,1\}$ for individual $i$ and locus $k$: 1 = homozygous for the randomly selected reference allele; 0.5 = heterozygous; 0 = homozygous for the alternative allele [@bradburd2018a].
 
 ```{r}
  
   col_vcf <- read.vcfR("~/Documents/Columbine/Data/GBS_Data/AQFO_snps_nc.vcf")
 
 # Extract genotype matrix
-  col_gt <- extract.gt(col_vcf, element = "GT", as.numeric = F)
+  col_gt <- t(extract.gt(col_vcf, element = "GT", as.numeric = F))
   
-# Function to convert to allelic load
-  allele_load <-  function(x, sep="\\|"){
+# Function to convert to allelic covariance
+  allele_freq_random_ref <-  function(x, sep="\\|"){
     spl <- str_split(x, pattern = sep, n=2, simplify = T)
-    as.numeric(spl[,1])+as.numeric(spl[,2])
+    spl_num <- apply(spl, 2, as.numeric)
+    random_ref <- as.numeric(rbernoulli(1,p=0.5))
+    apply(spl_num, 1, function(x){mean(x==random_ref)})
   }
   
-# convert to L matrix
-  col_ald <- apply(col_gt, 2, allele_load)
+  col_alfreq <- apply(col_gt,2, allele_freq_random_ref)
+  rownames(col_alfreq) <- rownames(col_gt)
   
-# rename rows and columns
-  rownames(col_ald) <- rownames(col_gt)
-  colnames(col_ald) <- colnames(col_gt)
-  
-# Put Individuals in rows and allelic load in columns
-  col_ald <- t(col_ald)
   
 ```
 
 $~$
 
-#### Create a mean-centered allelic loading matrix $\tilde {\bf L}$.
+#### Create allelic scatter matrix $S$.
 
 ```{r}
 
-  col_aldc <- apply(col_ald, 2, function(x){x-mean(x)})
-
+  col_alfreq_cent <- col_alfreq - 0.5
+  col_alscatter <- (col_alfreq_cent%*%t(col_alfreq_cent))
+  
 ```
 
 
@@ -68,9 +66,9 @@ $~$
 ```{r}
  
 # convert to dataframe
-  col_ald_df <- as.data.frame(col_aldc) 
-    col_ald_df <- cbind(rownames(col_ald_df), col_ald_df)
-    names(col_ald_df)[1] <- "Sample"
+  col_alfreq_df <- as.data.frame(col_alfreq) 
+    col_alfreq_df <- cbind(rownames(col_alfreq_df), col_alfreq_df)
+    names(col_alfreq_df)[1] <- "Sample"
 
 # load sample data
   samp_dat <- read.table("~/Documents/Columbine/Data/sequenced_samples.txt", header = T, as.is = T, sep = "\t")
@@ -83,7 +81,7 @@ $~$
   
  # merge population variables with L matrix
   col_popgen_data <- merge(samp_dat_sub[,c("Sample", "COMPLEX", "MEADOW_ID")], 
-                           col_ald_df)
+                           col_alfreq_df)
   
 # sort by complex then meadow
   col_popgen_data <- col_popgen_data[order(col_popgen_data$COMPLEX, 
@@ -366,7 +364,7 @@ where ${\bf K}_{(n\times m)}$ is a matrix of $n$ rows for the $n$ samples and $m
 ```{r}
 
   save(samp_dat_sub, node_data_sort, 
-       col_popgen_data, pw_data, X, K, D,
+       col_popgen_data, pw_data, X, K, col_alcov,
        file = "~/Documents/Columbine/Data/GBS_Data/spatial_weights_estimation.RData")
 
 ```

@@ -71,7 +71,8 @@ $~$
     names(col_alfreq_df)[1] <- "Sample"
 
 # load sample data
-  samp_dat <- read.table("~/Documents/Columbine/Data/sequenced_samples.txt", header = T, as.is = T, sep = "\t")
+  samp_dat <- read.table(here("Data", "sequenced_samples.txt"), 
+                         header = T, as.is = T, sep = "\t")
 
 # subset for columns of interest
   samp_dat_sub <- samp_dat[, c("Sample", "COMPLEX", "MEADOW_ID",

@@ -1,0 +1,462 @@
+---
+title: "Edgeweights figure"
+author: "D. G. Gannon"
+date: "January 2021"
+output:
+  github_document:
+    pandoc_args: --webtex
+bibliography: /Users/dusty/Documents/zotero_library.bib
+---
+
+
+```{r setup, include=FALSE, warning=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+  require(rstan)
+  require(CholWishart)
+  require(tidyverse)
+  require(here)
+  require(ggridges)
+  require(raster)
+
+# functions
+ #compute distance matrix among observations in matrix m
+  dist_matrix <- function(m){
+    n <- nrow(m)
+    ones <- rep(1,n)
+    Gmat <- m%*%t(m) 
+    diag_G <- diag(Gmat)
+    return(ones%*%t(diag_G) -2*Gmat + diag_G%*%t(ones))
+  }
+  
+# create symmetric matrix that is average of x[i] and x[j]
+  sym_matrix <- function(x){
+    N <- length(x)
+    M <- matrix(data = 0, nrow = N, ncol = N)
+    for(i in 1:N){
+      for(j in i:N){
+        M[i,j] <- (x[i] + x[j])/2
+      }
+    }
+     M_prime <- t(M)
+     M_prime <- `diag<-`(M_prime,0)
+     return(M + M_prime)
+  }
+  
+# construct the weights matrix given array X,
+#  vector beta, matrix Z, and vector alpha
+  
+  make_W <- function(size, X, beta, Z, alpha){
+    W_upper <- matrix(data=0, nrow = size, ncol = size)
+    for(i in 1:size){
+      for(j in i:size){
+        W_upper[i,j] <- exp(X[i,j,]%*%beta + Z[i,]%*%alpha)
+      }
+    }
+    W_upper <- `diag<-`(W_upper, 0)
+    return(W_upper + t(W_upper))
+  }
+
+```
+
+
+### Load data
+
+```{r}
+
+load(here("Data","mfit_full_re_mead.RData"))
+load(here("Data", "Indiv_lndscp_gen.RData"))
+forest <- raster(here("Data", "forest.tif"))
+
+```
+
+### Create data to predict over
+
+Create hypothetical plants for prediction located at the center of the sampled locations for each meadow.
+
+```{r}
+
+# find node centers
+  node_data <- group_by(samp_dat_sub, MEADOW_ID) %>% 
+                  summarise(., n=n(), node_x=mean(X_COORD), node_y=mean(Y_COORD),
+                            plant_density=mean(PL_IN_5M), mean_cover=mean(COVER),
+                            meadow_area=mean(MEADOW_AREA),
+                            forest_500m=mean(PROP_FOREST_500M_PL))
+# add complex info
+  mdw_complex <- unique(samp_dat_sub[,c("MEADOW_ID", "COMPLEX")])
+  node_data$complex <- mdw_complex$COMPLEX
+
+# compute the X array for the new plants
+  N_new <- nrow(node_data)
+  X_new <- array(data=1, dim = c(N_new, N_new, 9))
+  
+
+```
+
+
+### List of covariates
+
+* Intercept
+
+* geographic distance between plants $i$ and $j$ (Km)
+
+* mean plant density within five meters around $i$ and $j$
+
+* mean canopy cover above $i$ and $j$
+
+* mean proportion of forest within a 500m buffer around $i$ and $j$
+
+* distance $\times$ canopy cover interaction
+
+* distance $\times$ isolation (proportion of forest within 500m)
+
+* $\mathbb{I}$($i$ and $j$ from the same meadow)
+
+* $mathbb{I}$($i$ and $j$ from the same meadow complex)
+
+
+```{r}
+
+# distance
+
+  X_new[,,2] <- sqrt(
+    dist_matrix(
+      cbind(node_data$node_x, node_data$node_y)
+    )
+  )/1000
+
+# mean plant density
+ X_new[,,3] <- sym_matrix(node_data$plant_density)
+ 
+# mean canopy cover
+ X_new[,,4] <- sym_matrix(node_data$mean_cover)
+ 
+# mean isolation
+ X_new[,,5] <- sym_matrix(node_data$forest_500m)
+ 
+# distance by cover
+ X_new[,,6] <- X_new[,,2]*X_new[,,4]
+ 
+# distance by isolation
+ X_new[,,7] <- X_new[,,2]*X_new[,,5]
+ 
+# within meadow
+ X_new[,,8] <- diag(x=1, nrow = N_new, ncol=N_new)
+ 
+# within complex
+ for(i in 1:N_new){
+   for(j in 1:N_new){
+     X_new[,,9][i,j] <- as.numeric(node_data$complex[i] == node_data$complex[j])
+   }
+ }
+
+```
+
+
+### Create $\bf Z$ matrix
+
+```{r}
+
+Z_new <- diag(x=1, nrow = N_new, ncol = N_new)
+
+```
+
+
+### Extract posteriors of parameters and predict new $\bf W$
+
+```{r}
+
+# extract parameter posteriors
+  beta_post <- as.data.frame(rstan::extract(mfit_re, pars="beta"))
+  
+  alpha_post <- as.data.frame(rstan::extract(mfit_re, pars="alpha_raw"))
+  tau_post <- as.data.frame(rstan::extract(mfit_re, pars="tau"))
+  
+
+```
+
+
+### Plot posteriors for regression coefficients
+
+```{r}
+
+  post_estims <- data.frame(
+    expl_var = rep(c(
+      "Intercept",
+      "Geographic distance (Km)",
+      "Mean plant density",
+      "Mean canopy cover",
+      "Mean isolation",
+      "Distance*canopy cover",
+      "Distance*isolation",
+      "Within meadow effect",
+      "Within complex effect"
+    ), each=nrow(beta_post)),
+    beta = as.double(
+      unlist(beta_post)
+    )
+  )
+
+# convert to factor for the sake of ggplot
+  post_estims <- post_estims %>%
+    mutate(
+      f.expl_var = factor(expl_var,
+                          levels = c(
+      "Intercept",
+      "Geographic distance (Km)",
+      "Mean plant density",
+      "Mean canopy cover",
+      "Mean isolation",
+      "Distance*canopy cover",
+      "Distance*isolation",
+      "Within meadow effect",
+      "Within complex effect"  
+                          ))
+    )
+  
+# reverse levels for the plot
+  
+  post_estims <- post_estims %>%
+    mutate(
+      f.expl_var_rev = fct_rev(f.expl_var)
+    )
+  
+# create plot
+  fill_col <- rgb(36,123,160, maxColorValue = 255)
+  
+ effects_plot <-  ggplot(data = post_estims, aes(x=beta, y = f.expl_var_rev))+
+    geom_density_ridges(scale=1.5, size=0.2, bandwidth=0.03,
+                        fill=fill_col, alpha=0.8)+
+    theme(panel.background = element_blank(),
+          panel.grid.major.x = element_line(colour = "grey", size = 0.1),
+          axis.text.y = element_text(colour = "black", size=12),
+          axis.title = element_text(size=14))+
+    ylab("Posterior density")+
+    xlab(expression(beta[j]))
+ 
+ png(filename = here("Figures", "lndscp_gen_effs.png"),
+     height = 1800, width = 1500, units = "px", res = 300)
+   effects_plot
+ dev.off()
+
+```
+
+### Plot an estimate of the genetic network
+
+```{r}
+
+# get posterior means for beta and alpha
+
+  beta_post_mean <- as.double(apply(beta_post, 2, mean))
+  alpha_post_mean <- apply(alpha_post, 2, mean)*(mean(tau_post[,1]))
+
+  
+# make the weights matrix
+  W <- make_W(N_new, X_new, 
+              beta = beta_post_mean,
+              Z=Z_new,
+              alpha = alpha_post_mean)
+  
+# convert to a pairwise dataset
+  lines_df <- tibble(
+    meadow_i = rep(node_data$MEADOW_ID, N_new),
+    meadow_j = rep(node_data$MEADOW_ID, each=N_new),
+    weight = as.vector(W, mode = "double")
+  )
+  
+# remove ii connections
+  lines_df <- lines_df[
+    -which(lines_df$meadow_i == lines_df$meadow_j),
+    ]
+  
+# merge in location data
+  
+  lines_df_sp <- merge(lines_df, 
+                       node_data[,c("MEADOW_ID", "node_x", "node_y")],
+                       by.x="meadow_i",
+                       by.y="MEADOW_ID")
+  lines_df_sp <- merge(lines_df_sp,
+                       node_data[,c("MEADOW_ID", "node_x", "node_y")],
+                       by.x="meadow_j",
+                       by.y="MEADOW_ID")
+  
+  names(lines_df_sp)[4:length(names(lines_df_sp))] <- c(
+    "x_i", "y_i", "x_j", "y_j"
+  )
+  
+# scale the weight by the midrange
+  lines_df_sp <- lines_df_sp %>% 
+    mutate(
+      weight_scl = weight/((max(weight) - min(weight))/2)
+    )
+  
+# create raster df
+  forest_pts <- rasterToPoints(forest, spatial = T)
+  forest_df <- data.frame(forest_pts)
+  rm(forest_pts)
+  
+# plot colors
+  forest_col <- rgb(80,81,79, maxColorValue = 255)
+  mdw_col <- rgb(112, 193, 179, maxColorValue = 255)
+  point_col <- rgb(242,95,92, maxColorValue = 255)
+  line_col <- rgb(255, 224, 102, maxColorValue = 255)
+  
+  map_theme <- theme(
+    panel.background = element_blank(),
+    legend.position = "none",
+    
+  )
+  
+  cm <- ggplot()+
+    geom_raster(data = forest_df, aes(x=x, y=y, fill=forest))+
+    geom_segment(data = lines_df_sp,
+                 aes(x=x_i, y=y_i, xend=x_j, yend=y_j),
+                 size=lines_df_sp$weight_scl*2, color=line_col)+
+    geom_point(data = node_data,
+               aes(x=node_x, y=node_y), color=point_col,
+               size=3)+
+    scale_fill_gradient(low = mdw_col, high = forest_col)+
+    xlim(c(567000, 569000))+
+    ylim(c(4902100, 4904500))+
+    ggtitle("Carpenter Mountain")+
+    map_theme
+  
+  m2 <- ggplot()+
+    geom_raster(data = forest_df, aes(x=x, y=y, fill=forest))+
+    geom_segment(data = lines_df_sp,
+                 aes(x=x_i, y=y_i, xend=x_j, yend=y_j),
+                 size=lines_df_sp$weight_scl*2, color=line_col)+
+    geom_point(data = node_data,
+               aes(x=node_x, y=node_y), color=point_col,
+               size=3)+
+    scale_fill_gradient(low = mdw_col, high = forest_col)+
+    xlim(c(568000, 570800))+
+    ylim(c(4898900, 4900500))+
+    ggtitle("M2")+
+    map_theme
+  
+  m1 <- ggplot()+
+    geom_raster(data = forest_df, aes(x=x, y=y, fill=forest))+
+    geom_segment(data = lines_df_sp,
+                 aes(x=x_i, y=y_i, xend=x_j, yend=y_j),
+                 size=lines_df_sp$weight_scl*2, color=line_col)+
+    geom_point(data = node_data,
+               aes(x=node_x, y=node_y), color=point_col,
+               size=3)+
+    scale_fill_gradient(low = mdw_col, high = forest_col)+
+    xlim(c(570500, 572000))+
+    ylim(c(4898000, 4899000))+
+    ggtitle("M1")+
+    map_theme
+  
+  lom <- ggplot()+
+    geom_raster(data = forest_df, aes(x=x, y=y, fill=forest))+
+    geom_segment(data = lines_df_sp,
+                 aes(x=x_i, y=y_i, xend=x_j, yend=y_j),
+                 size=lines_df_sp$weight_scl*2, color=line_col)+
+    geom_point(data = node_data,
+               aes(x=node_x, y=node_y), color=point_col,
+               size=3)+
+    scale_fill_gradient(low = mdw_col, high = forest_col)+
+    xlim(c(568500, 572000))+
+    ylim(c(4894500, 4895750))+
+    ggtitle("Lookout Mountain")+
+    map_theme
+    
+  
+  all <- ggplot()+
+    geom_raster(data = forest_df, aes(x=x, y=y, fill=forest))+
+    geom_segment(data = lines_df_sp,
+                 aes(x=x_i, y=y_i, xend=x_j, yend=y_j),
+                 size=lines_df_sp$weight_scl, color=line_col)+
+    geom_point(data = node_data,
+               aes(x=node_x, y=node_y), color=point_col,
+               size=3)+
+    scale_fill_gradient(low = mdw_col, high = forest_col)+
+    map_theme
+  
+  plot_lo <- rbind(
+    c(1,1,1,2,2),
+    c(1,1,1,2,2),
+    c(1,1,1,3,3),
+    c(1,1,1,3,3),
+    c(1,1,1,4,4),
+    c(1,1,1,4,4),
+    c(1,1,1,5,5),
+    c(1,1,1,5,5)
+  )
+  
+png(filename = here("Figures", "genetic_networks.png"),
+    height = 3600, width = 3300, units = "px", res=300)  
+  grid.arrange(all, cm, m2, m1, lom,
+             layout_matrix=plot_lo)
+dev.off()
+```
+
+
+```{r}
+
+# 3D figure
+
+X_comb <- array(dim = c(dim(X)[c(1,2)],9))
+  X_comb[,,c(1:2)] <- X[,,c(1:2)]
+# now average them
+  X_comb[,,3] <- (X[,,"plant_density_i"] +
+    X[,,"plant_density_j"])/2
+  
+  X_comb[,,4] <- (X[,,"cover_i"]+
+                   X[,,"cover_j"])/2
+  
+  X_comb[,,5] <- (X[,,"forest_500m_i"]+
+                   X[,,"forest_500m_j"])/2
+  X_comb[,,6] <- X_comb[,,2]*X_comb[,,4]
+  X_comb[,,7] <- X_comb[,,2]*X_comb[,,5]
+  X_comb[,,8] <- X[,,10]
+  X_comb[,,9] <- X[,,11]
+  
+  dimnames(X_comb)[[3]] <- c("intercept", "geo_dist_ij",
+                             "avg_pl_density_ij", "avg_cover_ij",
+                             "avg_forest500_ij", "dist_by_cover",
+                             "dist_by_connect", "I_meadow", "I_complex")
+
+pw_data_ij$scatter <- col_alscatter[lower.tri(col_alscatter)]
+pw_data_ij$mean_iso <- X_comb[,,5][lower.tri(X_comb[,,5])]
+
+png(filename = here("Figures","isol_dist_3D1.png"), height = 1800,
+    width = 1800, res=300)
+with(pw_data_ij,{
+     scatter3D(x=mean_iso, y=dist_ij, z=scatter,
+               phi = 35, theta = 55,
+               xlab="Patch isolation", ylab = "Distance",
+               zlab="allelic cov.")
+}
+)
+dev.off()
+
+
+png(filename = here("Figures","isol_dist_3D2.png"), height = 1800,
+    width = 1800, res=300)
+with(pw_data_ij,{
+     scatter3D(x=mean_iso, y=dist_ij, z=scatter,
+               phi = 20, theta = 0,
+               xlab="Patch isolation", ylab = "Distance",
+               zlab="allelic cov.")
+}
+)
+dev.off()
+
+
+png(filename = here("Figures","isol_dist_3D3.png"), height = 1800,
+    width = 1800, res=300)
+with(pw_data_ij,{
+     scatter3D(x=mean_iso, y=dist_ij, z=scatter,
+               phi = 20, theta = 90,
+               xlab="Patch isolation", ylab = "Distance",
+               zlab="allelic cov.")
+}
+)
+dev.off()
+
+```
+
+

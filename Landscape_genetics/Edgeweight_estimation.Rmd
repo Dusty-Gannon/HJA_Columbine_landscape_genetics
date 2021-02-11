@@ -1,10 +1,13 @@
 ---
 title: "Estimating edge weights connecting HJA columbine genetic networks"
 author: "D. G. Gannon"
-date: "October 2020"
-output:
-  github_document:
-    pandoc_args: --webtex
+date: "February 2021"
+output: pdf_document
+header-includes:
+  \usepackage{amsmath}
+  \usepackage{bm}
+  \usepackage{setspace}
+  \doublespacing
 bibliography: /Users/dusty/Documents/zotero_library.bib
 ---
 
@@ -13,7 +16,7 @@ knitr::opts_chunk$set(echo = TRUE)
 
   require(rstan)
   require(CholWishart)
-  require(ggplot2)
+  require(tidyverse)
   require(here)
 
 # functions
@@ -29,41 +32,42 @@ knitr::opts_chunk$set(echo = TRUE)
 
 ### Data
 
-We have SNP data on $n=192$ *Aquilegia formosa* individuals from 25 meadows, which we consider to be "sub-populations" of the H.J. Andrews *A. formosa* population. We work with the allelic scatter matrix ${\bf S}$ computed from an allelic frequency matrix $F_{(n\times \ell)}$, where $\ell$ is the number of SNP loci sequenced and $n$ is the number of plants sequenced. Allelic frequencies are coded as $f_{ik} = 0$ if individual $i$ is homozygous for the randomly selected reference allele at locus $k$, $f_{ik}=0.5$ if individual $i$ has a heterozygous genotype at site $k$, and $f_{ik}=1$ if individual $i$ is homozygous with two copies of the alternative allele at site $k$. The data were previously filtered to include only bi-allelic loci. 
+We have SNP data on $n=192$ *Aquilegia formosa* individuals from 25 meadows, which we consider to be "sub-populations" of the H.J. Andrews *A. formosa* population. We work with the allelic scatter matrix ${\bf S}$ computed from an allelic frequency matrix $F_{(n\times \ell)}$, where $\ell$ is the number of SNP loci sequenced and $n$ is the number of plants sampled. Allelic frequencies are coded as $f_{ik} = 0$ if individual $i$ is homozygous for the randomly selected reference allele at locus $k$, $f_{ik}=0.5$ if individual $i$ has a heterozygous genotype at site $k$, and $f_{ik}=1$ if individual $i$ is homozygous with two copies of the alternative allele at site $k$. The data were previously filtered to include only bi-allelic loci. 
 
-We compute ${\bf S}$ as
+I computed ${\bf S}$ as
 
 $$
 {\bf S} = \left({\bf F} - \frac{1}{2}{\bf J}_{(n\times \ell)}\right)\left({\bf F} - \frac{1}{2}{\bf J}_{(n\times \ell)}\right)',
 $$
 
-where ${\bf J}_{(n\times \ell)}$ is an all-ones matrix and $'$ denotes the matrix transpose. This definition is the matrix representation of the allelic covariance matrix defined in [@bradburd2018].
+where ${\bf J}_{(n\times \ell)}$ is an all-ones matrix and $'$ denotes the matrix transpose. This definition is the matrix representation of the allelic covariance matrix defined by @bradburd2018 (**This we might need to adjust to set the diagonal to 0.25**).
 
 ### Model
 
-We assume that ${\bf S} \sim \text{Wishart}(\ell,\ {\boldsymbol \Sigma})$, where the number of SNP loci, $\ell$, is the degrees of freedom parameter and $\boldsymbol \Sigma$ is the scale matrix. To model spatial dependence among individual genotypes (i.e., isolation by distance [@wright1943] or isolation by resistance [@mcrae2006]), we let
+Following @bradburd2018 and @peterson2019, We assume that ${\bf S} \sim \text{Wishart}(\ell,\ {\boldsymbol \Sigma})$, where the number of SNP loci, $\ell$, is the degrees of freedom parameter and $\boldsymbol \Sigma$ is the scale matrix. To model spatial dependence among individual genotypes (i.e., isolation by distance [@wright1943] or isolation by resistance [@mcrae2006]), we let
 
 $$
 \boldsymbol{\Sigma} = ({\bf M} - \rho{\bf W})^{-1}.
 $$
 
-Above, ${\bf W}_{(n\times n)}$ is the weights matrix. It determines the degree of connectivity among nodes (defined as plants here) in a spatial network and is the parameter of interest. The parameter ${\bf M}$ is a diagonal matrix with $m_{ii} = \sum_{j=1}^nw_{ij}$ and all off-diagonal elements equal to zero, and $\rho$ controls the amount of spatial autocorrelation among the genotypes of nearby individuals. We model the weight between subpopulations $i$ and $j$ as a log-linear combination of covariates and regression parameters such that
+Above, ${\bf W}_{(n\times n)}$, $w_{ij} = 0$ for $i=j$, is the weights matrix. It determines the degree of connectivity among nodes (defined as plants here) in a spatial network and is the parameter of interest. The parameter ${\bf M}$ is a diagonal matrix with $m_{ii} = \sum_{j=1}^nw_{ij}$ and all off-diagonal elements equal to zero, and $\rho$ controls the amount of spatial autocorrelation among the genotypes of nearby individuals. We model the weight between plants $i$ and $j$ as a log-linear combination of covariates and regression parameters such that
 
 $$
 w_{ij} = \exp\{{\bf x}_{ij}'\boldsymbol \beta\},
 $$
-where ${\bf x}_{ij}$ is a vector of covariates for individuals $i$ and $j$ and $\boldsymbol \beta$ is a vector of regression parameters. Our covariates of interest are 
+where ${\bf x}_{ij}$ is a vector of covariates for individuals $i$ and $j$ and $\boldsymbol \beta$ is a vector of regression parameters. Our covariates of interest are with respect to *edges* in the network. Therefore, we average the covariates that are measurements on a node. For example, if $d_i,d_j$ are the flowering plant densities around plants $i$ and $j$ (respectively), then the explanatory variable for the edgeweight $w_{ij}=w_{ji} = (d_i + d_j)/2$. This helps ensure a symmetric weights matrix where explanatory variables measured at node $i$ are given equal weights as the same measures at node $j$. The list of explanatory variables is:
 
-* geographic distance (km)
-* proportion of forested cells that intersect the Euclidean line between plants $i$ and $j$
-* interaction between distance and intervening forest
-* percent canopy cover for plant $i$
-* percent canopy cover for plant $j$
-* flowering plant density around plant $i$ (individuals/25$\pi \text{m}^2$)
-* flowering plant density around plant $j$ (individuals/25$\pi \text{m}^2$)
-* proportion of landscape that is forested within 100m of plant $i$
-* proportion of landscape that is forested within 100m of plant $j$
+* **Geographic distance between plants $i$ and $j$ (km)**.
 
+* **Average flowering plant density within 5m of plants $i$ and $j$**. We expect that high flowering plant densities should attract more pollinators. Therefore, a given plant in a high density patch may export more pollen and sire more offspring in the surrounding area than a plant in a low density patch. This should result in higher allelic covariance between this plant and a randomly selected plant on the landscape.
+
+* **Average proportion of forested cells within a 500m radius around plants $i$ and $j$**. We use this as a measure of average "functional connectivity", hypothesizing that the more forest around a plant, the fewer pollinators will find it and therefore the less connected it is to other plants. We selected a cutoff of 500m based on previous work with hummingbirds which indicated a 50\% reduction in the probability of movement between two locations with an increase of 500m.
+
+* **Average canopy cover over plants $i$ and $j$**. The logic for including this explanatory variable is that well-connected plants (those not surrounded by lots of forest) may still be growing under a tree. This may reduce the chances of being visited by a pollinator if pollinators flying overhead are less likely to see the plant.
+
+* **Squared proportion of forested cells within a 500m radius**. Based on some data visualizations, it looks like there could be a peak of allelic covariance at intermediate levels surrounding forest. This does not seem unreasonable if plants and/or pollinators prefer some shade in the heat of the day or if hummingbirds prefer partially forested areas for the sake of nesting and perching.
+
+* **Interaction between distance and canopy cover immediately over plants $i$ and $j$**. Because we think plants may be more difficult for a pollinator to find if growing beneath a tree, we might expect higher rates of mating between plants under the same tree (or trees), than two plants at the same distance but in the open. This should result in greater allelic covariance for two nearby plants under high canopy cover. However, two plants under different trees that are far apart may be very unlikely to mate. We therefore expect the effect of canopy cover to vary depending on geographic distance between plants $i$ and $j$.
 
 
 ### Priors
@@ -77,9 +81,10 @@ $$
 and
 
 $$
-\rho \sim \mathcal{B}(2,2).
+\rho \sim \mathcal{B}(2,2),
 $$
 
+where $\mathcal{B}(\alpha, \beta)$ is a Beta distribution with shape parameters $\alpha$ and $\beta$.
 
 #### Stan Model Code
 
@@ -89,18 +94,18 @@ functions{
 // function to make weights matrix from regression array X and
 // paramater vector v
   matrix make_W(int N, vector v, real[,,] X){
-    matrix[N,N] W;
+    matrix[N,N] Wmat;
     for(i in 1:N){
-      if(i == 1){W[i,i] = 0;}
+      if(i == 1){Wmat[i,i] = 0;}
       else{
         for(j in 1:(i-1)){
-          W[i,i] = 0;
-          W[i,j] = exp(to_row_vector(X[i,j,])*v);
-          W[j,i] = F[i,j];
+          Wmat[i,i] = 0;
+          Wmat[i,j] = exp(to_row_vector(X[i,j,])*v);
+          Wmat[j,i] = Wmat[i,j];
         }
       }
     }
-    return(W);
+    return(Wmat);
   }
 
 }
@@ -120,7 +125,6 @@ parameters{
 
   vector[P] beta;              //regression parameters
   real<lower=0,upper=1> rho;   //spatial dependence
-  //real<lower=0> tau;           //
 
 }
 
@@ -147,12 +151,112 @@ transformed parameters{
 model{
   
 //priors
-  beta ~ normal(0,1);
+  beta ~ normal(0,10);
   rho ~ beta(2,2);
 
   
 //likelihood
   S ~ wishart(L, Sigma);
+
+}
+
+generated quantities{
+
+  real loglik;
+  
+  loglik = wishart_lpdf(S | L, Sigma);
+
+}
+
+```
+
+```{r echo=FALSE}
+knitr::knit_exit()
+```
+
+
+```{stan output.var="wishart_edgeweight_model_re", eval=FALSE, echo=FALSE}
+
+functions{
+// function to make weights matrix from regression array X and
+// paramater vector v
+  matrix make_W(int N, vector v, real[,,] X, vector a, matrix Z, real s){
+    matrix[N,N] Wmat;
+    for(i in 1:N){
+      if(i == 1){Wmat[i,i] = 0;}
+      else{
+        for(j in 1:(i-1)){
+          Wmat[i,i] = 0;
+          Wmat[i,j] = exp(to_row_vector(X[i,j,])*v + (Z[i,]*a)*s);
+          Wmat[j,i] = Wmat[i,j];
+        }
+      }
+    }
+    return(Wmat);
+  }
+
+}
+
+data{
+
+  int<lower=1> N;          // number of individuals sampled
+  int<lower=1> L;          // number of SNP loci
+  int<lower=1> P;          // number of landscape and node variables
+  int<lower=1> K;          // number of groups (meadows)
+  
+  real X[N,N,P];           // design array
+  matrix[N,K] Z;           // random effect design matrix
+  matrix[N,N] S;           // scatter matrix 
+
+}
+
+parameters{
+
+  vector[P] beta;              // regression parameters
+  vector[K] alpha_raw;         // random meadow effects
+  real<lower=0> tau;           // scale parameter for meadow effects
+  real<lower=0,upper=1> rho;   // spatial dependence
+
+}
+
+transformed parameters{
+
+  matrix[N,N] W;
+  vector[N] W_sum;
+  matrix[N,N] M;
+  cov_matrix[N] Sigma;
+  
+  W = make_W(N, beta, X, alpha_raw, Z, tau);
+  
+  for(i in 1:N){
+    W_sum[i] = sum(W[i,]);
+  }
+  
+  M = diag_matrix(W_sum);
+  
+  Sigma = inverse((M - (rho*W)));
+
+}
+
+model{
+  
+//priors
+  beta ~ normal(0,10);
+  rho ~ beta(2,2);
+
+  alpha_raw ~ normal(0,1);
+  tau ~ normal(0,1);
+  
+//likelihood
+  S ~ wishart(L, Sigma);
+
+}
+
+generated quantities{
+
+  real loglik;
+  
+  loglik = wishart_lpdf(S | L, Sigma);
 
 }
 
@@ -174,28 +278,58 @@ Because we assume the weights matrix ${\bf W}$ is symmetric, we average the node
 
 ```{r, eval=FALSE, include=FALSE}
 
-  X_comb <- array(dim = c(dim(X)[c(1,2)],7))
-  X_comb[,,c(1:3)] <- X[,,c(1:3)]
+  X_comb <- array(dim = c(dim(X)[c(1,2)],9))
+  X_comb[,,c(1:2)] <- X[,,c(1:2)]
 # now average them
-  X_comb[,,4] <- (X[,,"plant_density_i"] +
+  X_comb[,,3] <- (X[,,"plant_density_i"] +
     X[,,"plant_density_j"])/2
   
-  X_comb[,,5] <- (X[,,"cover_i"]+
+  X_comb[,,4] <- (X[,,"cover_i"]+
                    X[,,"cover_j"])/2
   
-  X_comb[,,6] <- (X[,,"meadow_area_i"]+
-                   X[,,"meadow_area_j"])/2
+# Because isolation is also used as a squared term,
+# we should center it before squaring it in order
+# to reduce correlation
   
-  X_comb[,,7] <- (X[,,"forest_100m_i"]+
-                   X[,,"forest_100m_j"])/2
+  iso <- as.double(X[,,"forest_500m_i"]+
+                   X[,,"forest_500m_j"])/2
   
-  dimnames(X_comb)[[3]] <- c("intercept", "geo_dist_ij", "prop_forest_ij",
+  iso_cent <- (iso-mean(iso))/sd(iso)
+  X_comb[,,5] <- matrix(iso_cent, nrow = 192, ncol = 192)
+  
+  
+# nonlinear isolation effect
+  X_comb[,,6] <- X_comb[,,5]^2
+  
+# distance*cover effect
+  X_comb[,,7] <- X_comb[,,2]*X_comb[,,4]
+  
+  X_comb[,,8] <- X[,,10]
+  X_comb[,,9] <- X[,,11]
+  
+  dimnames(X_comb)[[3]] <- c("intercept", "geo_dist_ij",
                              "avg_pl_density_ij", "avg_cover_ij",
-                             "avg_meadow_size_ij", "avg_forest100_ij")
+                             "avg_forest500_ij", "avg_forest_ij_sq",
+                             "dist_by_cover", "I_meadow", "I_complex")
 
+
+  
+  
+```
+
+
+Build matrix of indicator variables for the meadow effects.
+
+```{r}
+
+f.meadow <- factor(col_popgen_data$MEADOW_ID)
+
+Z <- model.matrix(~f.meadow-1)
 
 ```
 
+
+Define diagonal of allelic covariance matrix as $\frac{1}{4}L$, as in [@bradburd2018].
 
 
 
@@ -204,23 +338,138 @@ Because we assume the weights matrix ${\bf W}$ is symmetric, we average the node
   N <- dim(col_alscatter)[1]
   num_covs <- dim(X_comb)[3]
   num_snps <- dim(col_popgen_data)[2] - 3
+  num_meadows <- dim(Z)[2]
+  S <- col_alscatter
+  diag(S) <- num_snps*0.25
 
-  mod_data <- list(N=N,
+  mod_data_re <- list(N=N,
                    P=num_covs,
                    L=num_snps,
+                   K=num_meadows,
                    X=X_comb,
-                   S=col_alscatter)
+                   Z=Z,
+                   S=S)
   
-  mfit <- sampling(wishart_edgeweight_model,
-                   data=mod_data,
+  mfit_re <- sampling(wishart_edgeweight_model_re,
+                   data=mod_data_re,
                    iter=1000,
                    chains=2)
 
 ```
 
 
+Posterior predictive checks
+
+```{r}
+
+# Get diagonal from the observed covariance matrix
+
+  obs_diag <- diag(col_alscatter)
+  nsamps <- nrow(col_popgen_data)
+
+## generate some posterior predictive datasets
+
+ # extract draws from posterior of W
+  post_Sigma <- rstan::extract(mfit_re, pars="Sigma")
+
+ # random vector of draws
+  rdraws <- sample(1:dim(post_Sigma$Sigma)[1], 
+                   size = 500,
+                   replace = F)
+ 
+ # create a dataset from each 
+  rSig <- map(rdraws,
+            ~post_Sigma$Sigma[.x,,])
+  
+  rS <- map(rSig,
+            ~rWishart(1, df=num_snps,
+                              Sigma = .x))
+
+  pred_diag <- map(rS,
+                   ~diag(.x[,,1]))
+  
+  pred_diag_mat <- (matrix(unlist(pred_diag),
+                          nrow = nsamps,
+                          ncol = nsamps,
+                          byrow = T))
+  
+
+```
 
 
+Plot posterior predictive checks
+
+```{r}
+
+# df of means and intervals
+
+plot_df <- data.frame(
+  obs = obs_diag,
+  pred = apply(pred_diag_mat, 2, mean),
+  low = apply(pred_diag_mat, 2, quantile, probs=0.025),
+  high = apply(pred_diag_mat, 2, quantile, probs=0.975)
+)
+
+plot_df_sort <- plot_df[order(plot_df$pred), ]
+plot_df_sort$x <- 1:nsamps
+
+ggplot(data = plot_df_sort, aes(x=x,y=obs))+
+  geom_errorbar(aes(ymin=low, ymax=high), width=0)+
+  geom_point(aes(y=pred), size=3)+
+  geom_point(color="red", size=0.5)+
+  theme_classic()
+
+```
+
+Prediction of covariance among samples
+
+```{r}
+
+ obs_covs <- col_alscatter[lower.tri(col_alscatter, diag=F)]
+
+ rcovs <- sample(1:length(obs_covs), size = 2000, replace = F)
+ 
+ pred_covs <- map(rS,
+                  ~.x[,,1][lower.tri(.x[,,1], diag = F)])
+ 
+ pred_covs <- map(pred_covs,
+                  ~.x[rcovs])
+ 
+ pred_rcov_mat <- matrix(unlist(pred_covs),
+                         nrow = length(rS),
+                         ncol = length(rcovs),
+                         byrow = T)
+ 
+
+
+```
+
+
+Plot posterior predictive checks
+
+```{r}
+
+# df of means and intervals
+
+plot_df_cov <- data.frame(
+  obs = obs_covs[rcovs],
+  pred = apply(pred_rcov_mat, 2, mean),
+  low = apply(pred_rcov_mat, 2, quantile, probs=0.025),
+  high = apply(pred_rcov_mat, 2, quantile, probs=0.975)
+)
+
+plot_df_sort_cov <- plot_df_cov[order(plot_df_cov$pred), ]
+plot_df_sort_cov$x <- 1:length(rcovs)
+
+ggplot(data = plot_df_sort_cov, aes(x=x,y=obs))+
+#  geom_errorbar(aes(ymin=low, ymax=high), width=0)+
+  geom_point(aes(y=pred), size=1)+
+  geom_point(color="red", size=0.5)+
+  theme_classic()+
+  geom_smooth(aes(x=x,y=obs), se=F, color="red")+
+  geom_smooth(aes(x=x,y=pred), se=F, color="grey")
+
+```
 
 
 

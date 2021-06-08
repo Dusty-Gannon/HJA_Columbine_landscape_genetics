@@ -18,6 +18,8 @@ knitr::opts_chunk$set(echo = TRUE)
   require(here)
   require(ggridges)
   require(raster)
+  require(extrafont)
+  require(gridExtra)
 
 # functions
  #compute distance matrix among observations in matrix m
@@ -29,32 +31,32 @@ knitr::opts_chunk$set(echo = TRUE)
     return(ones%*%t(diag_G) -2*Gmat + diag_G%*%t(ones))
   }
   
-# create symmetric matrix that is average of x[i] and x[j]
-  sym_matrix <- function(x){
-    N <- length(x)
-    M <- matrix(data = 0, nrow = N, ncol = N)
-    for(i in 1:N){
-      for(j in i:N){
-        M[i,j] <- (x[i] + x[j])/2
-      }
-    }
-     M_prime <- t(M)
-     M_prime <- `diag<-`(M_prime,0)
-     return(M + M_prime)
-  }
-  
 # construct the weights matrix given array X,
 #  vector beta, matrix Z, and vector alpha
   
-  make_W <- function(size, X, beta, Z, alpha){
+  make_W <- function(size, X, beta, Z, alpha, tau){
     W_upper <- matrix(data=0, nrow = size, ncol = size)
     for(i in 1:size){
       for(j in i:size){
-        W_upper[i,j] <- exp(X[i,j,]%*%beta + Z[i,]%*%alpha)
+        W_upper[i,j] <- exp(X[i,j,]%*%beta + Z[i,]%*%alpha*tau)
       }
     }
     W_upper <- `diag<-`(W_upper, 0)
     return(W_upper + t(W_upper))
+  }
+  
+# create symmetric matrices with {i,j} pair means
+  
+  sym_matrix <- function(v){
+    m <- matrix(data=0, nrow = length(v), ncol = length(v))
+    for (i in 1:length(v)) {
+      for(j in i:length(v)){
+        m[i,j] <- 0.5*(v[i] + v[j])
+      }
+    }
+    m_zdiag <- m
+    m_zdiag <- `diag<-`(m,0)
+    return(m + t(m_zdiag))
   }
 
 ```
@@ -64,35 +66,23 @@ knitr::opts_chunk$set(echo = TRUE)
 
 ```{r}
 
-load(here("Data","mfit_full_re_mead.RData"))
+fit <- readRDS(here("Data","mfit_full_dist_interactions_wm_wc_re.rds"))
 load(here("Data", "Indiv_lndscp_gen.RData"))
 forest <- raster(here("Data", "forest.tif"))
 
 ```
 
-### Create data to predict over
-
-Create hypothetical plants for prediction located at the center of the sampled locations for each meadow.
+### Extract posteriors of parameters and predict new $\bf W$
 
 ```{r}
 
-# find node centers
-  node_data <- group_by(samp_dat_sub, MEADOW_ID) %>% 
-                  summarise(., n=n(), node_x=mean(X_COORD), node_y=mean(Y_COORD),
-                            plant_density=mean(PL_IN_5M), mean_cover=mean(COVER),
-                            meadow_area=mean(MEADOW_AREA),
-                            forest_500m=mean(PROP_FOREST_500M_PL))
-# add complex info
-  mdw_complex <- unique(samp_dat_sub[,c("MEADOW_ID", "COMPLEX")])
-  node_data$complex <- mdw_complex$COMPLEX
-
-# compute the X array for the new plants
-  N_new <- nrow(node_data)
-  X_new <- array(data=1, dim = c(N_new, N_new, 9))
+# extract parameter posteriors
+  beta_post <- as.data.frame(rstan::extract(fit, pars="beta"))
+  alpha_post <- as.data.frame(rstan::extract(fit, pars="alpha_raw"))
+  tau_post <- as.data.frame(rstan::extract(fit, pars="tau"))
   
 
 ```
-
 
 ### List of covariates
 
@@ -106,17 +96,116 @@ Create hypothetical plants for prediction located at the center of the sampled l
 
 * mean proportion of forest within a 500m buffer around $i$ and $j$
 
+* distance $\times$ plant density interaction
+
 * distance $\times$ canopy cover interaction
 
 * distance $\times$ isolation (proportion of forest within 500m)
 
-* $\mathbb{I}$($i$ and $j$ from the same meadow)
+* $\mathbb{I}$($i$ and $j$ from the same meadow complex)
 
-* $mathbb{I}$($i$ and $j$ from the same meadow complex)
+* $mathbb{I}$($i$ and $j$ from the same meadow)
 
+### Plot posteriors for regression coefficients
 
 ```{r}
 
+  post_estims <- data.frame(
+    expl_var = rep(c(
+      "Intercept",
+      "Geographic distance (Km)",
+      "Mean plant density",
+      "Mean canopy cover",
+      "Mean isolation",
+      "Distance*plant density",
+      "Distance*canopy cover",
+      "Distance*isolation",
+      "I{same complex}",
+      "I{same meadow}"
+    ), each=nrow(beta_post)),
+    beta = as.double(
+      unlist(beta_post)
+    )
+  )
+
+# remove the intercept for plotting
+  post_estims <- post_estims[-which(post_estims$expl_var == "Intercept"), ]
+
+# convert to factor for the sake of ggplot
+  post_estims <- post_estims %>%
+    mutate(
+      f.expl_var = factor(expl_var,
+                          levels = c(
+      "Geographic distance (Km)",
+      "Mean plant density",
+      "Mean canopy cover",
+      "Mean isolation",
+      "Distance*plant density",
+      "Distance*canopy cover",
+      "Distance*isolation",
+      "I{same complex}",
+      "I{same meadow}" 
+                          ))
+    )
+  
+# reverse levels for the plot
+  
+  post_estims <- post_estims %>%
+    mutate(
+      f.expl_var_rev = fct_rev(f.expl_var)
+    )
+  
+
+  
+# create plot
+  fill_col <- "#003049"
+  
+ effects_plot <-  ggplot(data = post_estims, aes(x=beta, y = f.expl_var_rev))+
+    geom_density_ridges(scale=2, size=0.2, bandwidth=0.05,
+                        fill=fill_col, alpha=0.7)+
+    geom_vline(xintercept = 0, size=0.2, linetype="dashed",
+               alpha=0.5) +
+    theme(panel.background = element_blank(),
+          panel.grid.major.x = element_line(colour = "grey", size = 0.1),
+          axis.text.y = element_text(colour = "black", size=12, family = "Times New Roman"),
+          axis.title = element_text(size=14, family = "Times New Roman"))+
+    ylab("Posterior density")+
+    xlab(expression(beta[j]))
+ 
+ png(filename = here("Figures", "lndscp_gen_effs.png"),
+     height = 1800, width = 1800, units = "px", res = 300)
+   effects_plot
+ dev.off()
+
+```
+
+### Create data to predict over
+
+Create hypothetical plants for prediction located at the center of the sampled locations for each meadow.
+
+```{r}
+
+# find node centers
+  node_data <- group_by(samp_dat_sub, MEADOW_ID) %>% 
+                  summarise(., 
+                    n=n(), 
+                    node_x=mean(X_COORD), 
+                    node_y=mean(Y_COORD),
+                    plant_density=mean(PL_IN_5M), 
+                    mean_cover=mean(COVER)/100,
+                    meadow_area=mean(MEADOW_AREA),
+                    forest_500m=mean(PROP_FOREST_500M_PL)
+                  )
+
+# add complex info
+  mdw_complex <- unique(samp_dat_sub[,c("MEADOW_ID", "COMPLEX")])
+  node_data$complex <- mdw_complex$COMPLEX
+
+# compute the X array for the new plants
+  N_new <- nrow(node_data)
+  P <- dim(beta_post)[2]
+  X_new <- array(data=1, dim = c(N_new, N_new, P))
+  
 # distance
 
   X_new[,,2] <- sqrt(
@@ -134,21 +223,35 @@ Create hypothetical plants for prediction located at the center of the sampled l
 # mean isolation
  X_new[,,5] <- sym_matrix(node_data$forest_500m)
  
+# distance by plant density
+ X_new[,,6] <- X_new[,,2]*X_new[,,3]
+ 
 # distance by cover
- X_new[,,6] <- X_new[,,2]*X_new[,,4]
+ X_new[,,7] <- X_new[,,2]*X_new[,,4]
  
 # distance by isolation
- X_new[,,7] <- X_new[,,2]*X_new[,,5]
+ X_new[,,8] <- X_new[,,2]*X_new[,,5]
  
 # within meadow
- X_new[,,8] <- diag(x=1, nrow = N_new, ncol=N_new)
- 
-# within complex
  for(i in 1:N_new){
    for(j in 1:N_new){
      X_new[,,9][i,j] <- as.numeric(node_data$complex[i] == node_data$complex[j])
    }
  }
+ 
+# within complex
+ X_new[,,10] <- diag(x=1, nrow = N_new, ncol=N_new)
+ 
+ dimnames(X_new)[[3]] <- c("intercept",
+                             "dist",
+                             "avg_pl_density_ij", 
+                             "avg_cover_ij",
+                             "avg_forest500_ij",
+                             "dens_by_dist",
+                             "cover_by_dist",
+                             "forest_by_dist",
+                             "Isame_complex",
+                             "Isame_meadow")
 
 ```
 
@@ -162,100 +265,23 @@ Z_new <- diag(x=1, nrow = N_new, ncol = N_new)
 ```
 
 
-### Extract posteriors of parameters and predict new $\bf W$
-
-```{r}
-
-# extract parameter posteriors
-  beta_post <- as.data.frame(rstan::extract(mfit_re, pars="beta"))
-  
-  alpha_post <- as.data.frame(rstan::extract(mfit_re, pars="alpha_raw"))
-  tau_post <- as.data.frame(rstan::extract(mfit_re, pars="tau"))
-  
-
-```
-
-
-### Plot posteriors for regression coefficients
-
-```{r}
-
-  post_estims <- data.frame(
-    expl_var = rep(c(
-      "Intercept",
-      "Geographic distance (Km)",
-      "Mean plant density",
-      "Mean canopy cover",
-      "Mean isolation",
-      "Distance*canopy cover",
-      "Distance*isolation",
-      "Within meadow effect",
-      "Within complex effect"
-    ), each=nrow(beta_post)),
-    beta = as.double(
-      unlist(beta_post)
-    )
-  )
-
-# convert to factor for the sake of ggplot
-  post_estims <- post_estims %>%
-    mutate(
-      f.expl_var = factor(expl_var,
-                          levels = c(
-      "Intercept",
-      "Geographic distance (Km)",
-      "Mean plant density",
-      "Mean canopy cover",
-      "Mean isolation",
-      "Distance*canopy cover",
-      "Distance*isolation",
-      "Within meadow effect",
-      "Within complex effect"  
-                          ))
-    )
-  
-# reverse levels for the plot
-  
-  post_estims <- post_estims %>%
-    mutate(
-      f.expl_var_rev = fct_rev(f.expl_var)
-    )
-  
-# create plot
-  fill_col <- rgb(36,123,160, maxColorValue = 255)
-  
- effects_plot <-  ggplot(data = post_estims, aes(x=beta, y = f.expl_var_rev))+
-    geom_density_ridges(scale=1.5, size=0.2, bandwidth=0.03,
-                        fill=fill_col, alpha=0.8)+
-    theme(panel.background = element_blank(),
-          panel.grid.major.x = element_line(colour = "grey", size = 0.1),
-          axis.text.y = element_text(colour = "black", size=12),
-          axis.title = element_text(size=14))+
-    ylab("Posterior density")+
-    xlab(expression(beta[j]))
- 
- png(filename = here("Figures", "lndscp_gen_effs.png"),
-     height = 1800, width = 1500, units = "px", res = 300)
-   effects_plot
- dev.off()
-
-```
-
-### Plot an estimate of the genetic network
+### Plot an estimate of the gene flow network
 
 ```{r}
 
 # get posterior means for beta and alpha
 
   beta_post_mean <- as.double(apply(beta_post, 2, mean))
-  alpha_post_mean <- apply(alpha_post, 2, mean)*(mean(tau_post[,1]))
+  alpha_post_mean <- apply(alpha_post, 2, mean)
+  tau_post_mean <- mean(tau_post$tau)
 
   
 # make the weights matrix
   W <- make_W(N_new, X_new, 
               beta = beta_post_mean,
               Z=Z_new,
-              alpha = alpha_post_mean)
+              alpha = alpha_post_mean,
+              tau = tau_post_mean)
   
 # convert to a pairwise dataset
   lines_df <- tibble(
@@ -284,11 +310,93 @@ Z_new <- diag(x=1, nrow = N_new, ncol = N_new)
     "x_i", "y_i", "x_j", "y_j"
   )
   
-# scale the weight by the midrange
-  lines_df_sp <- lines_df_sp %>% 
+# merge in complex information
+  lines_df_sp <- merge(
+    lines_df_sp,
+    node_data[,c("MEADOW_ID", "complex")],
+    by.x="meadow_j",
+    by.y="MEADOW_ID"
+  )
+  names(lines_df_sp)[which(names(lines_df_sp)=="complex")] <- "complex_j"
+  
+  lines_df_sp <- merge(
+    lines_df_sp,
+    node_data[,c("MEADOW_ID", "complex")],
+    by.x="meadow_i",
+    by.y="MEADOW_ID"
+  )
+  names(lines_df_sp)[which(names(lines_df_sp)=="complex")] <- "complex_i"
+  
+# re_sort
+  lines_df_sp <-
+    lines_df_sp[order(lines_df_sp$meadow_i, lines_df_sp$meadow_j), ]
+  
+# create complex-specific datasets
+  cm_df <- lines_df_sp[
+    which(
+      lines_df_sp$complex_i == "CM" &
+      lines_df_sp$complex_j == "CM"
+    ),
+  ]
+  
+  m2_df <- lines_df_sp[
+    which(
+      lines_df_sp$complex_i == "M2" &
+      lines_df_sp$complex_j == "M2"
+    ),
+  ]
+  
+  m1_df <- lines_df_sp[
+    which(
+      lines_df_sp$complex_i == "M1" &
+      lines_df_sp$complex_j == "M1"
+    ),
+  ] 
+  
+  lom_df <- lines_df_sp[
+    which(
+      lines_df_sp$complex_i == "LOM" &
+      lines_df_sp$complex_j == "LOM"
+    ),
+  ]   
+  
+# # scale the weight by the midrange
+  stretch_factor <-5
+  
+  lines_df_sp <- lines_df_sp %>%
     mutate(
-      weight_scl = weight/((max(weight) - min(weight))/2)
+      weight_scl = exp(1.5*(log(weight) - min(log(weight))))
     )
+  lines_df_sp$weight_scl <- lines_df_sp$weight_scl/max(lines_df_sp$weight_scl)*2
+
+  
+ # CM 
+  cm_df <- cm_df %>%
+    mutate(
+      weight_scl = exp(stretch_factor*(log(weight) - min(log(weight))))
+    )
+  cm_df$weight_scl <- cm_df$weight_scl/max(cm_df$weight_scl)*2
+  
+ # M2
+  m2_df <- m2_df %>%
+    mutate(
+      weight_scl = exp(stretch_factor*(log(weight) - min(log(weight))))
+    )
+  m2_df$weight_scl <- m2_df$weight_scl/max(m2_df$weight_scl)*2
+  
+ # M1
+  m1_df <- m1_df %>%
+    mutate(
+      weight_scl = exp(stretch_factor*(log(weight) - min(log(weight))))
+    )
+  m1_df$weight_scl <- m1_df$weight_scl/max(m1_df$weight_scl)*2
+  
+# LOM
+  lom_df <- lom_df %>%
+    mutate(
+      weight_scl = exp(stretch_factor*(log(weight) - min(log(weight))))
+    )
+  lom_df$weight_scl <- lom_df$weight_scl/max(lom_df$weight_scl)*2
   
 # create raster df
   forest_pts <- rasterToPoints(forest, spatial = T)
@@ -296,25 +404,36 @@ Z_new <- diag(x=1, nrow = N_new, ncol = N_new)
   rm(forest_pts)
   
 # plot colors
-  forest_col <- rgb(80,81,79, maxColorValue = 255)
-  mdw_col <- rgb(112, 193, 179, maxColorValue = 255)
-  point_col <- rgb(242,95,92, maxColorValue = 255)
-  line_col <- rgb(255, 224, 102, maxColorValue = 255)
+  forest_col <- "grey"
+  mdw_col <- "white"
+  point_col <- "#D62828"
+  line_col <- "#003049"
   
   map_theme <- theme(
     panel.background = element_blank(),
     legend.position = "none",
-    
+    axis.text = element_blank(),
+    axis.ticks = element_blank(),
+    axis.title = element_blank(),
+    plot.title = element_text(family = "Times New Roman", size = 18)
   )
   
   cm <- ggplot()+
     geom_raster(data = forest_df, aes(x=x, y=y, fill=forest))+
-    geom_segment(data = lines_df_sp,
+    geom_segment(data = cm_df,
                  aes(x=x_i, y=y_i, xend=x_j, yend=y_j),
-                 size=lines_df_sp$weight_scl*2, color=line_col)+
+                 size=cm_df$weight_scl,
+                 color=line_col,
+                 alpha=cm_df$weight_scl/max(cm_df$weight_scl))+
     geom_point(data = node_data,
                aes(x=node_x, y=node_y), color=point_col,
                size=3)+
+    geom_segment(aes(
+      x= 567200, 
+      y = 4904300,
+      xend = 567700,
+      yend = 4904300,
+    ), color="black", size=2) + 
     scale_fill_gradient(low = mdw_col, high = forest_col)+
     xlim(c(567000, 569000))+
     ylim(c(4902100, 4904500))+
@@ -323,12 +442,19 @@ Z_new <- diag(x=1, nrow = N_new, ncol = N_new)
   
   m2 <- ggplot()+
     geom_raster(data = forest_df, aes(x=x, y=y, fill=forest))+
-    geom_segment(data = lines_df_sp,
+    geom_segment(data = m2_df,
                  aes(x=x_i, y=y_i, xend=x_j, yend=y_j),
-                 size=lines_df_sp$weight_scl*2, color=line_col)+
+                 size=m2_df$weight_scl,
+                 color=line_col,
+                 alpha=m2_df$weight_scl/max(m2_df$weight_scl))+
     geom_point(data = node_data,
                aes(x=node_x, y=node_y), color=point_col,
                size=3)+
+    geom_segment(
+      aes(x=568200, y=4900300, xend=568700, yend=4900300),
+      color="black",
+      size=2
+    ) +
     scale_fill_gradient(low = mdw_col, high = forest_col)+
     xlim(c(568000, 570800))+
     ylim(c(4898900, 4900500))+
@@ -337,12 +463,19 @@ Z_new <- diag(x=1, nrow = N_new, ncol = N_new)
   
   m1 <- ggplot()+
     geom_raster(data = forest_df, aes(x=x, y=y, fill=forest))+
-    geom_segment(data = lines_df_sp,
+    geom_segment(data = m1_df,
                  aes(x=x_i, y=y_i, xend=x_j, yend=y_j),
-                 size=lines_df_sp$weight_scl*2, color=line_col)+
+                 size=m1_df$weight_scl,
+                 color=line_col,
+                 alpha=m1_df$weight_scl/max(m1_df$weight_scl))+
     geom_point(data = node_data,
                aes(x=node_x, y=node_y), color=point_col,
                size=3)+
+    geom_segment(
+      aes(x=570700, y=4898900, xend=571200, yend=4898900),
+      color="black",
+      size=2
+    ) +
     scale_fill_gradient(low = mdw_col, high = forest_col)+
     xlim(c(570500, 572000))+
     ylim(c(4898000, 4899000))+
@@ -351,12 +484,19 @@ Z_new <- diag(x=1, nrow = N_new, ncol = N_new)
   
   lom <- ggplot()+
     geom_raster(data = forest_df, aes(x=x, y=y, fill=forest))+
-    geom_segment(data = lines_df_sp,
+    geom_segment(data = lom_df,
                  aes(x=x_i, y=y_i, xend=x_j, yend=y_j),
-                 size=lines_df_sp$weight_scl*2, color=line_col)+
+                 size=lom_df$weight_scl,
+                 color=line_col,
+                 alpha = lom_df$weight_scl/max(lom_df$weight_scl))+
     geom_point(data = node_data,
                aes(x=node_x, y=node_y), color=point_col,
                size=3)+
+    geom_segment(
+      aes(x=568700, y=4895550, xend=569200, yend=4895550),
+      color="black",
+      size=2
+    ) +
     scale_fill_gradient(low = mdw_col, high = forest_col)+
     xlim(c(568500, 572000))+
     ylim(c(4894500, 4895750))+
@@ -368,12 +508,23 @@ Z_new <- diag(x=1, nrow = N_new, ncol = N_new)
     geom_raster(data = forest_df, aes(x=x, y=y, fill=forest))+
     geom_segment(data = lines_df_sp,
                  aes(x=x_i, y=y_i, xend=x_j, yend=y_j),
-                 size=lines_df_sp$weight_scl, color=line_col)+
+                 size=lines_df_sp$weight_scl,
+                 color=line_col,
+                 alpha=lines_df_sp$weight_scl/max(lines_df_sp$weight_scl))+
     geom_point(data = node_data,
                aes(x=node_x, y=node_y), color=point_col,
                size=3)+
+    geom_segment(
+      aes(x=571800, y=4904000, xend=572800, yend=4904000),
+      color="black",
+      size=2.5
+    ) +
     scale_fill_gradient(low = mdw_col, high = forest_col)+
-    map_theme
+    ggtitle("Frizzel Ridge") +
+    map_theme +
+    theme(
+      plot.title = element_text(size = 24)
+    )
   
   plot_lo <- rbind(
     c(1,1,1,2,2),

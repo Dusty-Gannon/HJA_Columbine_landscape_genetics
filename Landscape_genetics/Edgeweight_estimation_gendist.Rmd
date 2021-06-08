@@ -1,0 +1,556 @@
+---
+title: "Estimating edge weights connecting HJA columbine genetic networks"
+author: "D. G. Gannon"
+date: "February 2021"
+output: pdf_document
+header-includes:
+  \usepackage{amsmath}
+  \usepackage{bm}
+  \usepackage{setspace}
+  \doublespacing
+bibliography: /Users/dusty/Documents/zotero_library.bib
+---
+
+```{r setup, include=FALSE, warning=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+  require(rstan)
+  require(CholWishart)
+  require(Matrix)
+  require(tidyverse)
+  require(here)
+
+# functions
+  sq_dist_matrix <- function(m){
+    n <- nrow(m)
+    ones <- rep(1,n)
+    Gmat <- m%*%t(m) 
+    diag_G <- diag(Gmat)
+    return(ones%*%t(diag_G) -2*Gmat + diag_G%*%t(ones))
+  }
+  
+  
+# DIC
+  DIC_wishart <- function(S, estims, loglik){
+    with(estims, {
+       -2*(dWishart(S, df=kappa, Sigma = Sigma_hat, log = T) - 
+          var(loglik))
+    })
+  }
+  
+# build contrast matrix
+  contrast_mat <- function(n){
+    L <- diag(x=1, nrow = n-1, ncol = n)
+    Ljp1 <- diag(x=1,nrow = n-1, ncol = n-1)
+    Ljp1 <- cbind(rep(0,n-1),Ljp1)
+    L-Ljp1
+  }
+
+```
+
+
+```{stan output.var="wishart_edgeweight_model", eval=FALSE}
+
+functions{
+
+  matrix contrasts(int N){
+    matrix[N-1,N] L;
+    for(i in 1:(N-1)){
+      for(j in 1:N){
+        if(i==j){L[i,j] = 1;}
+        else if(j == (i+1)){L[i,j] = -1;}
+        else{L[i,j] = 0;}
+      }
+    }
+    return(L);
+  }
+  
+// function to make weights matrix from regression array X and
+// paramater vector v
+  matrix make_W(int N, vector v, real[,,] X){
+    matrix[N,N] Wmat;
+    for(i in 1:N){
+      if(i == 1){Wmat[i,i] = 0;}
+      else{
+        for(j in 1:(i-1)){
+          Wmat[i,i] = 0;
+          Wmat[i,j] = exp(to_row_vector(X[i,j,])*v);
+          Wmat[j,i] = Wmat[i,j];
+        }
+      }
+    }
+    return(Wmat);
+  }
+
+}
+
+data{
+
+  int<lower=1> N;          //number of individuals sampled
+  int<lower=1> K;          //number of SNP loci
+  int<lower=1> P;          //number of landscape variables
+  
+  real X[N,N,P];           //design array with explanatory variables
+  matrix[N,K] al_LD;       //allelic load matrix 
+
+}
+
+transformed data{
+
+  matrix[N-1,N] L = contrasts(N);
+  
+  matrix[N-1,N-1] S = 2*(L*al_LD)*((L*al_LD)');
+
+}
+
+
+parameters{
+
+  vector[P] beta;              //regression parameters
+  real<lower=0,upper=1> rho;   //spatial dependence
+  real<lower=0,upper=1> kappa_std; // standardized degrees of freedom parameter
+
+}
+
+transformed parameters{
+
+  matrix[N,N] W;
+  vector[N] W_sum;
+  matrix[N,N] M;
+  cov_matrix[N] Sigma;
+  real<lower=N,upper=K> kappa;
+  
+  
+  W = make_W(N, beta, X);
+  
+  for(i in 1:N){
+    W_sum[i] = sum(W[i,]);
+  }
+  
+  M = diag_matrix(W_sum);
+  
+  Sigma = inverse((M - (rho*W)));
+  
+  kappa = (K-N)*kappa_std + N;
+
+}
+
+model{
+  
+//priors
+  beta ~ normal(0,5);
+  rho ~ beta(20,1);
+  kappa_std ~ beta(10, 1);
+  
+
+//likelihood
+  S ~ wishart(kappa, L*(2*Sigma)*(L'));
+
+}
+
+generated quantities{
+
+  real loglik;
+  
+  loglik = wishart_lpdf(S | kappa, L*(2*Sigma)*(L'));
+
+}
+
+```
+
+
+```{stan output.var="wishart_edgeweight_model_re", eval=FALSE}
+
+functions{
+
+  matrix contrasts(int N){
+    matrix[N-1,N] L;
+    for(i in 1:(N-1)){
+      for(j in 1:N){
+        if(i==j){L[i,j] = 1;}
+        else if(j == (i+1)){L[i,j] = -1;}
+        else{L[i,j] = 0;}
+      }
+    }
+    return(L);
+  }
+  
+// function to make weights matrix from regression array X and
+// paramater vector v
+  matrix make_W(int N, vector v, real[,,] X, vector a, matrix Z, real s){
+    matrix[N,N] Wmat;
+    for(i in 1:N){
+      if(i == 1){Wmat[i,i] = 0;}
+      else{
+        for(j in 1:(i-1)){
+          Wmat[i,i] = 0;
+          Wmat[i,j] = exp(to_row_vector(X[i,j,])*v + 
+                           (Z[i,]*a)*s + 
+                           (Z[j,]*a)*s);
+          Wmat[j,i] = Wmat[i,j];
+        }
+      }
+    }
+    return(Wmat);
+  }
+
+}
+
+data{
+
+  int<lower=1> N;          //number of individuals sampled
+  int<lower=1> K;          //number of SNP loci
+  int<lower=1> P;          //number of landscape and node variables
+  int<lower=1> G;          // number of groups (meadows)
+  
+  real X[N,N,P];           //design array
+  matrix[N,G] Z;           // random effect design matrix
+  matrix[N,K] al_LD;       //allelic load matrix 
+
+}
+
+transformed data{
+
+  matrix[N-1,N] L = contrasts(N);
+  
+  matrix[N-1,N-1] S = 2*(L*al_LD)*((L*al_LD)');
+
+}
+
+
+parameters{
+
+  vector[P] beta;              //regression parameters
+  real<lower=0,upper=1> rho;   //spatial dependence
+  vector[G] alpha_raw;         // random meadow effects
+  real<lower=0> tau;           // scale parameter for meadow effects
+  real<lower=0,upper=1> kappa_std; // degrees of freedom parameter
+
+}
+
+transformed parameters{
+
+  matrix[N,N] W;
+  vector[N] W_sum;
+  matrix[N,N] M;
+  cov_matrix[N] Sigma;
+  real<lower=N,upper=K> kappa;
+  
+  
+  W = make_W(N, beta, X, alpha_raw, Z, tau);
+  
+  for(i in 1:N){
+    W_sum[i] = sum(W[i,]);
+  }
+  
+  M = diag_matrix(W_sum);
+  
+  Sigma = inverse((M - (rho*W)));
+  
+  kappa = (K-N)*kappa_std + N;
+
+}
+
+model{
+  
+//priors
+  beta ~ normal(0,5);
+  rho ~ beta(5,1);
+  kappa_std ~ beta(5, 1);
+  alpha_raw ~ normal(0,1);
+  tau ~ normal(0,2);
+  
+
+//likelihood
+  S ~ wishart(kappa, L*(2*Sigma)*(L'));
+
+}
+
+generated quantities{
+
+  matrix[N-1,N-1] pred;
+  real loglik;
+  
+  loglik = wishart_lpdf(S | kappa, L*(2*Sigma)*(L'));
+  pred = wishart_rng(kappa, L*(2*Sigma)*(L'));
+
+}
+
+```
+
+
+```{r}
+  load(here("Data", "Indiv_lndscp_gen.RData"))
+```
+
+## Format the design matrix into an $n\times n\times p$ array
+
+```{r warning=FALSE}
+
+  X_comb <- array(dim = c(dim(X)[c(1,2)],10))
+  X_comb[,,c(1,2)] <- X[,,c(1,2)]
+  
+# now average and standardize them
+  X_comb[,,3] <- (X[,,"plant_density_i"] +
+    X[,,"plant_density_j"])/2
+  
+  X_comb[,,4] <- ((X[,,"cover_i"]+
+                   X[,,"cover_j"])/2)
+
+# isolation
+  X_comb[,,5] <- ((X[,,"forest_500m_i"]+
+            X[,,"forest_500m_j"])/2)
+  
+# Each variable may interact with distance
+  X_comb[,,6] <- X_comb[,,2]*X_comb[,,3]
+  X_comb[,,7] <- X_comb[,,2]*X_comb[,,4]
+  X_comb[,,8] <- X_comb[,,2]*X_comb[,,5]
+  
+# create a within-complex effect
+  complexes <- group_by(col_popgen_data, COMPLEX) %>%
+    summarise(n=n())
+  
+  complex_submats <- map(1:nrow(complexes),
+                         ~matrix(data = 1,
+                                 nrow = complexes$n[.x],
+                                 ncol = complexes$n[.x]))
+  X_comb[,,9] <- as.matrix(bdiag(complex_submats))
+  
+# create within-meadow effect
+  meadows <- group_by(col_popgen_data, MEADOW_ID) %>%
+    summarise(n=n())
+  
+  meadow_submats <- map(1:nrow(meadows),
+                        ~matrix(data = 1,
+                                nrow = meadows$n[.x],
+                                ncol = meadows$n[.x]))
+  X_comb[,,10] <- as.matrix(bdiag(meadow_submats))
+  
+  
+  
+  dimnames(X_comb)[[3]] <- c("intercept",
+                             "dist",
+                             "avg_pl_density_ij", 
+                             "avg_cover_ij",
+                             "avg_forest500_ij",
+                             "dens_by_dist",
+                             "cover_by_dist",
+                             "forest_by_dist",
+                             "Isame_complex",
+                             "Isame_meadow")
+  
+
+```
+
+## Create meadow indexing matrix Z
+
+```{r}
+
+# Sanity check that things are in the right order
+all.equal(rownames(col_alLD), col_popgen_data$Sample)
+
+Z <- matrix(data = 0,
+            nrow = nrow(col_alLD),
+            ncol = length(unique(col_popgen_data$MEADOW_ID)))
+
+mdws <- unique(col_popgen_data$MEADOW_ID)
+
+for (i in 1:nrow(Z)) {
+  col_id <- which(mdws == col_popgen_data$MEADOW_ID[i])
+  Z[i, col_id] <- 1
+}
+
+```
+
+
+## Fitting the model
+
+```{r}
+# list remainder of data inputs
+ 
+  N <- dim(col_alLD)[1]
+  num_covs <- dim(X_comb)[3]
+  num_snps <- dim(col_alLD)[2]
+  num_meadows <- length(mdws)
+
+  mod_data <- list(N=N,
+                   P=num_covs,
+                   K=num_snps,
+                   G=num_meadows,
+                   X=X_comb,
+                   Z=Z,
+                   al_LD=col_alLD)
+  
+# fit the model
+  mfit <- sampling(wishart_edgeweight_model_re,
+                   data=mod_data,
+                   iter=1000,
+                   chains=2,
+                   control=list(max_treedepth=12))
+  
+  saveRDS(mfit, file =
+            here(
+              "Data",
+              "mfit_full_dist_interactions_wm_wc_re.rds"
+            ))
+```
+
+```{r echo=FALSE}
+mfit <- read_rds(
+  here("Data", "mfit_full_dist_interactions_wm_wc_re.rds")
+)
+```
+
+
+```{r}
+# comparing models
+  m1 <- read_rds(
+    here("Data", 
+         "mfit_full_dist_interactions_wm_wc_re.rds")
+  )
+  m2 <- read_rds(
+    here(
+      "Data",
+      "mfit_full_dist_interactions_wm_wc.rds"
+    )
+  )
+ # Genetic distance matrix
+  L <- contrast_mat(n=N)
+  genD_contrast <- 2*(L%*%col_alLD)%*%t(L%*%col_alLD)
+
+# get posterior estimates for m1
+  kappa1_post <- as.data.frame(
+    rstan::extract(m1, pars="kappa")
+  )
+  Sigma1_post <- as.data.frame(
+    rstan::extract(m1, pars="Sigma")
+  )
+  Sigma1_hat <- matrix(
+    data = apply(Sigma1_post,2,mean),
+    nrow = N,
+    ncol = N
+  )
+  loglik1 <- as.data.frame(rstan::extract(m1, pars="loglik"))
+  
+# store in a list
+  estims1 <- list(
+    kappa=mean(kappa1_post$kappa),
+    Sigma_hat = L%*%(2*Sigma1_hat)%*%t(L)
+  )
+
+# get posterior estimates for m2
+  kappa2_post <- as.data.frame(
+    rstan::extract(m2, pars="kappa")
+  )
+  Sigma2_post <- as.data.frame(
+    rstan::extract(m2, pars="Sigma")
+  )
+  Sigma2_hat <- matrix(
+    data = apply(Sigma2_post,2,mean),
+    nrow = N,
+    ncol = N
+  )
+# store in a list
+  estims2 <- list(
+    kappa=mean(kappa2_post$kappa),
+    Sigma_hat = round(L%*%(2*Sigma2_hat)%*%t(L),6)
+  )
+# get draws from log posterior
+  loglik2 <- as.data.frame(rstan::extract(m2, pars="loglik"))
+  
+  DIC_wishart(genD_contrast, estims = estims1,
+              loglik = as.double(loglik1$loglik))
+  DIC_wishart(genD_contrast, estims = estims2,
+              loglik = as.double(loglik2$loglik))
+
+```
+
+## Posterior predictive checks
+
+```{r}
+
+# First build the contrasts matrix L
+  L <- contrast_mat(
+    mod_data$N
+  )
+# project the distance matrix down one dimension
+  S_obs <- 2*(L%*%col_alLD)%*%t(L%*%col_alLD)   
+
+# Extract posterior predictions
+  D_proj_pp <- rstan::extract(mfit, pars = "pred")
+  
+# convert random subset of predictions to a list of matrices
+  rsamps <- sample(
+    1:dim(D_proj_pp[[1]])[1], 
+    replace = F,
+    size = 100
+  )
+  
+  D_proj_pp_sub <- map(
+    1:length(rsamps),
+    ~as.matrix(D_proj_pp[[1]][.x,,])
+  )
+  
+# convert to vectors of lower triangles
+  preds <- map(
+    D_proj_pp_sub,
+    ~.x[lower.tri(.x, diag = T)]
+  )
+  
+# convert to a matrix with columns as diagonal elements
+#  of the wishart r.v.'s and
+  preds_mat <- matrix(
+    data = unlist(preds),
+    nrow = length(preds),
+    ncol = length(S_obs[lower.tri(S_obs, diag = T)]),
+    byrow = T
+  )
+  
+  obs_v_pred <- data.frame(
+    obs = S_obs[lower.tri(S_obs, diag = T)],
+    pred_mean = apply(
+      preds_mat,
+      MARGIN = 2,
+      FUN = mean
+    ),
+    low = apply(
+      preds_mat,
+      MARGIN = 2,
+      FUN = quantile,
+      probs=0.025
+    ),
+    high = apply(
+      preds_mat,
+      MARGIN = 2,
+      FUN = quantile,
+      probs=0.975
+    )
+  )
+  
+# sort from low to high
+  
+  obs_v_pred <- obs_v_pred[
+    order(obs_v_pred$obs),
+  ]
+  obs_v_pred$ID <- 1:nrow(obs_v_pred)
+  
+# plot the results
+  ggplot(data = obs_v_pred)+
+    geom_errorbar(aes(x=ID, ymin=low, ymax=high),
+                  width=0.2)+
+    geom_point(aes(x=ID, y=obs), colour="red",
+               size=0.2)
+
+# calculate proportion of observations outside the predictive range
+  
+  mean(
+    (obs_v_pred$obs < obs_v_pred$low) |
+    (obs_v_pred$obs > obs_v_pred$high)
+  )
+  
+```
+
+
+
+
+

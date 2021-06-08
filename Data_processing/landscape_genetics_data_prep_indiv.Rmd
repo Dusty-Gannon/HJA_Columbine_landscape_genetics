@@ -43,9 +43,19 @@ Load vcf file with SNPs from presumably non-coding regions and convert genotype 
     random_ref <- as.numeric(rbernoulli(1,p=0.5))
     apply(spl_num, 1, function(x){mean(x==random_ref)})
   }
+ 
+# loadings matrix 
+  allele_load <- function(x, sep="\\|"){
+    spl <- str_split(x, pattern = sep, n=2, simplify = T)
+    spl_num <- apply(spl, 2, as.numeric)
+    return(spl_num[,1] + spl_num[,2])
+  }
+  
+  col_alLD <- apply(col_gt, 2, allele_load)
   
   col_alfreq <- apply(col_gt,2, allele_freq_random_ref)
   rownames(col_alfreq) <- rownames(col_gt)
+  rownames(col_alLD) <- rownames(col_gt)
 
 ```
 
@@ -365,6 +375,7 @@ $~$
 
   save(samp_dat_sub, pw_data_ij, 
        col_popgen_data, X, col_alscatter,
+       col_alLD,
        file = here("Data", "Indiv_lndscp_gen.RData"))
 
 ```

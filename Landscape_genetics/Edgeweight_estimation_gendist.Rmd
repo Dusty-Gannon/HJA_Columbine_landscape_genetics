@@ -20,7 +20,9 @@ knitr::opts_chunk$set(echo = TRUE)
   require(tidyverse)
   require(here)
 
-# functions
+#  Functions
+
+## matrix of squared distances
   sq_dist_matrix <- function(m){
     n <- nrow(m)
     ones <- rep(1,n)
@@ -30,7 +32,7 @@ knitr::opts_chunk$set(echo = TRUE)
   }
   
   
-# DIC
+# DIC function using posterior draws
   DIC_wishart <- function(S, estims, loglik){
     with(estims, {
        -2*(dWishart(S, df=kappa, Sigma = Sigma_hat, log = T) - 
@@ -38,7 +40,7 @@ knitr::opts_chunk$set(echo = TRUE)
     })
   }
   
-# build contrast matrix
+# Build contrast matrix 
   contrast_mat <- function(n){
     L <- diag(x=1, nrow = n-1, ncol = n)
     Ljp1 <- diag(x=1,nrow = n-1, ncol = n-1)
@@ -48,121 +50,92 @@ knitr::opts_chunk$set(echo = TRUE)
 
 ```
 
+## Data
 
-```{stan output.var="wishart_edgeweight_model", eval=FALSE}
+We have biallelic SNP genotype data from $n=192$ *Aquilegia formosa* individuals from 25 meadows, which we consider to be "sub-populations" of the H.J. Andrews *A. formosa* population. We work with the genetic distance matrix defined by ${\bf D} = ({\bf y}_i - {\bf y}_j)^T({\bf y}_i - {\bf y}_j)$ where ${\bf y}_i,\ i=1,2,...,n$ is the $K$-vector of genotypes of individual $i$ at loci $k=1,2,...,K$ coded as $y_{ik} \in \{0,1,2\}$. $y_{ik}=0$ if individual $i$ is homozygous for the major allele at locus $k$, $y_{ik}=1$ if individual $i$ is heterozygous at locus $k$ and $y_{ik}=2$ if individual $i$ is homozygous for the minor allele at locus $k$.
 
-functions{
+### Model
 
-  matrix contrasts(int N){
-    matrix[N-1,N] L;
-    for(i in 1:(N-1)){
-      for(j in 1:N){
-        if(i==j){L[i,j] = 1;}
-        else if(j == (i+1)){L[i,j] = -1;}
-        else{L[i,j] = 0;}
-      }
-    }
-    return(L);
-  }
-  
-// function to make weights matrix from regression array X and
-// paramater vector v
-  matrix make_W(int N, vector v, real[,,] X){
-    matrix[N,N] Wmat;
-    for(i in 1:N){
-      if(i == 1){Wmat[i,i] = 0;}
-      else{
-        for(j in 1:(i-1)){
-          Wmat[i,i] = 0;
-          Wmat[i,j] = exp(to_row_vector(X[i,j,])*v);
-          Wmat[j,i] = Wmat[i,j];
-        }
-      }
-    }
-    return(Wmat);
-  }
+@mccullagh2009 showed that distance (or dissimilarity) matrices can be modeled using a *generalized Wishart* distribution, or, equivalently, that linear contrasts on distance matrices can be modeled using a Wishart distribution. @hanks2013a illustrated the relationship between this result and the *Isolation by Resistance* model of genetic differentiation [@mcrae2006], which is a theoretical construct relating migration and gene flow to random walks along edges and among nodes of a graph, where the nodes represent populations. @mcrae2006 showed that if we imagine the graph as an electrical circuit connected by a set of resistors, then the electrical resistance among nodes is proportional to $F_{ST}$, a measure of genetic differentiation among populations [@wright1922]. 
 
-}
+@hanks2013a further developed a spatial regression model of genetic differentiation that utilizes the connection between graph edge weights and genetic distance and the (generalized) Wishart likelihood. We fit a similar model here, with some minor modifications.
 
-data{
+Let $w_{ij}$ be the edge weight connecting plants $i$ and $j$, which we assume is positively related to gene flow between the spatial locations of plants $i$ and $j$. We model the edgeweights using the log-linear model
 
-  int<lower=1> N;          //number of individuals sampled
-  int<lower=1> K;          //number of SNP loci
-  int<lower=1> P;          //number of landscape variables
-  
-  real X[N,N,P];           //design array with explanatory variables
-  matrix[N,K] al_LD;       //allelic load matrix 
+$$
+w_{ij} = \exp \left\{{\bf g}_{ij}^T \bm \beta +  
+\frac{1}{2}({\bf x}_i + {\bf x}_j)^T \bm \gamma + {\bf Z}_i {\bm \alpha} + {\bf Z}_j {\bm \alpha} \right\},
+$$
+where:
 
-}
+* ${\bf g}_{ij}$ is a $p_g$ vector of explanatory variables that can be measured on the edge connecting nodes $i$ and $j$ (e.g., length of the edge, whether the edge crosses some biologically relevant landscape feature, etc.).
 
-transformed data{
+* $\bm \beta$ is a $p_g$ vector of regression coefficients.
 
-  matrix[N-1,N] L = contrasts(N);
-  
-  matrix[N-1,N-1] S = 2*(L*al_LD)*((L*al_LD)');
+* ${\bf x}_i$ is a $p_x$ vector of explanatory variables measured on the node (i.e., at the location of the plant, such as canopy cover above plant $i$).
 
-}
+* $\bm \gamma$ is $p_x$ vector of regression coefficients.
+
+* $\underset{\scriptscriptstyle n \times m}{\bf Z}$ is an indicator matrix indicating to which of the $m$ groups (meadows in this case) individual $i=1,2,...,n$ belongs. 
+
+* ${\bm \alpha} \sim \mathcal{N}({\bf 0}, \tau \underset{\scriptscriptstyle m \times m}{\bf I})$, $\tau > 0$, ${\bf I}$ is the identity matrix.
+
+Let ${\bf W}$ be the matrix of edge weights with $w_{ij}=0$ if $i=j$. A *conditional autoregressive spatial* model assumes that a given measurement, $\eta_i,\ i=1,2,...,n$, in a spatial graph (a genotype in our case) is a weighted average of the values of the nodes to which it is connected, with $w_{ij}$ the weight of the influence of node $j$ on the value of node $i$. Under this model, it can be shown that the covariance matrix defined by $\text{Var}(\bm \eta) = \bm \Sigma$ is
 
 
-parameters{
 
-  vector[P] beta;              //regression parameters
-  real<lower=0,upper=1> rho;   //spatial dependence
-  real<lower=0,upper=1> kappa_std; // standardized degrees of freedom parameter
+$$
+\boldsymbol{\Sigma} = ({\bf M} - \rho{\bf W})^{-1},
+$$
+where ${\bf M}$ is a diagonal matrix with $m_{ii} = \sum_{j=1}^n w_{ij}$ and all off-diagonal elements equal to zero, and $\rho$ controls the amount of spatial autocorrelation in genotypes. Using results from [@mccullagh2009], we define a statistic model relating ${\bf D}$, the genetic distance matrix, to $\bm \Sigma$. Specifically,
 
-}
+$$
+{\bf L}(-{\bf D}){\bf L}^T \sim \mathcal{W}_\kappa({\bf L}2({\bf M - \rho{\bf W}})^{-1}{\bf L}^T),
+$$
+where $\mathcal{W}_k({\bm \Gamma})$ denotes a Wishart distribution with degrees of freedom parameter $\kappa$ and scale matrix $\bm \Gamma$.
 
-transformed parameters{
+This model differs from that of @hanks2013a in three ways. First, we include geographic distance as an explanatory variable in the log-linear model for the weights instead of multiplying the regression equation by the inverse of distance. We felt this was more natural since it allows edge weights to go to zero at great distances if the regression parameter associated with geographic distance is negative. Second, while the theoretical connection between this model and resistance distance [@mcrae2006;@hanks2013a] is stronger in the case where $\rho =1$ (i.e., an *intrinsic autoregressive model* - ICAR model), this defines a rank-deficient precision matrix. Because generalized inverses for rank-deficient matrices are known to be numerically unstable, we chose to put a prior on $\rho$ with most prior weight towards 1. This allows the model to tend towards the ICAR model without resulting in a rank-deficient precision matrix. Finally, @hanks2013a define $\kappa=K$, which is true when all loci are neutral and mutually independent. Because we do not know if this is the case for our SNP data, we assume $\kappa$ is an unknown parameter to be estimated.
 
-  matrix[N,N] W;
-  vector[N] W_sum;
-  matrix[N,N] M;
-  cov_matrix[N] Sigma;
-  real<lower=N,upper=K> kappa;
-  
-  
-  W = make_W(N, beta, X);
-  
-  for(i in 1:N){
-    W_sum[i] = sum(W[i,]);
-  }
-  
-  M = diag_matrix(W_sum);
-  
-  Sigma = inverse((M - (rho*W)));
-  
-  kappa = (K-N)*kappa_std + N;
 
-}
-
-model{
-  
-//priors
-  beta ~ normal(0,5);
-  rho ~ beta(20,1);
-  kappa_std ~ beta(10, 1);
-  
-
-//likelihood
-  S ~ wishart(kappa, L*(2*Sigma)*(L'));
-
-}
-
-generated quantities{
-
-  real loglik;
-  
-  loglik = wishart_lpdf(S | kappa, L*(2*Sigma)*(L'));
-
-}
-
+```{r}
+knitr::knit_exit()
 ```
 
+
+* **Geographic distance between plants $i$ and $j$ (km)**.
+
+* **Average flowering plant density within 5m of plants $i$ and $j$**. We expect that high flowering plant densities should attract more pollinators. Therefore, a given plant in a high density patch may export more pollen and sire more offspring in the surrounding area than a plant in a low density patch. This should result in higher allelic covariance between this plant and a randomly selected plant on the landscape.
+
+* **Average proportion of forested cells within a 500m radius around plants $i$ and $j$**. We use this as a measure of average "functional connectivity", hypothesizing that the more forest around a plant, the fewer pollinators will find it and therefore the less connected it is to other plants. We selected a cutoff of 500m based on previous work with hummingbirds which indicated a 50\% reduction in the probability of movement between two locations with an increase of 500m.
+
+* **Average canopy cover over plants $i$ and $j$**. The logic for including this explanatory variable is that well-connected plants (those not surrounded by lots of forest) may still be growing under a tree. This may reduce the chances of being visited by a pollinator if pollinators flying overhead are less likely to see the plant.
+
+* **Squared proportion of forested cells within a 500m radius**. Based on some data visualizations, it looks like there could be a peak of allelic covariance at intermediate levels surrounding forest. This does not seem unreasonable if plants and/or pollinators prefer some shade in the heat of the day or if hummingbirds prefer partially forested areas for the sake of nesting and perching.
+
+* **Interaction between distance and canopy cover immediately over plants $i$ and $j$**. Because we think plants may be more difficult for a pollinator to find if growing beneath a tree, we might expect higher rates of mating between plants under the same tree (or trees), than two plants at the same distance but in the open. This should result in greater allelic covariance for two nearby plants under high canopy cover. However, two plants under different trees that are far apart may be very unlikely to mate. We therefore expect the effect of canopy cover to vary depending on geographic distance between plants $i$ and $j$.
+
+
+### Priors
+
+We assume the following weakly informative priors for the regression parameters and $\rho$:
+
+$$
+{\boldsymbol \beta} \sim \mathcal{N}({\bf 0}_P,\ {\bf I}_{(P\times P)}),
+$$
+
+and
+
+$$
+\rho \sim \mathcal{B}(2,2),
+$$
+
+where $\mathcal{B}(\alpha, \beta)$ is a Beta distribution with shape parameters $\alpha$ and $\beta$.
 
 ```{stan output.var="wishart_edgeweight_model_re", eval=FALSE}
 
 functions{
 
+// Function to create contrasts matrix L
   matrix contrasts(int N){
     matrix[N-1,N] L;
     for(i in 1:(N-1)){
@@ -196,6 +169,7 @@ functions{
 
 }
 
+
 data{
 
   int<lower=1> N;          //number of individuals sampled
@@ -209,6 +183,7 @@ data{
 
 }
 
+// Transform allelic load matrix into contrasts on distances
 transformed data{
 
   matrix[N-1,N] L = contrasts(N);
@@ -230,14 +205,14 @@ parameters{
 
 transformed parameters{
 
-  matrix[N,N] W;
-  vector[N] W_sum;
-  matrix[N,N] M;
-  cov_matrix[N] Sigma;
-  real<lower=N,upper=K> kappa;
+  matrix[N,N] W;                 // spatial weights or conductance matrix
+  vector[N] W_sum;               // vector of row sums of W
+  matrix[N,N] M;                 // diagonal matrix with W_sum along diagonal
+  cov_matrix[N] Sigma;           // inverse of (M-rho*W)
+  real<lower=N,upper=K> kappa;   // scaled and shifted degrees of freedom parameter
   
   
-  W = make_W(N, beta, X, alpha_raw, Z, tau);
+  W = make_W(N, beta, X, alpha_raw, Z, tau);  // define W based on loglinear model
   
   for(i in 1:N){
     W_sum[i] = sum(W[i,]);
@@ -247,7 +222,7 @@ transformed parameters{
   
   Sigma = inverse((M - (rho*W)));
   
-  kappa = (K-N)*kappa_std + N;
+  kappa = (K-N)*kappa_std + N;               // shift and scale degrees of freedom parameter
 
 }
 
@@ -268,8 +243,8 @@ model{
 
 generated quantities{
 
-  matrix[N-1,N-1] pred;
-  real loglik;
+  matrix[N-1,N-1] pred;    // Posterior predictive draws
+  real loglik;             // loglikelihood of posterior draws given data
   
   loglik = wishart_lpdf(S | kappa, L*(2*Sigma)*(L'));
   pred = wishart_rng(kappa, L*(2*Sigma)*(L'));
@@ -527,11 +502,6 @@ mfit <- read_rds(
     )
   )
   
-# sort from low to high
-  
-  obs_v_pred <- obs_v_pred[
-    order(obs_v_pred$obs),
-  ]
   obs_v_pred$ID <- 1:nrow(obs_v_pred)
   
 # plot the results

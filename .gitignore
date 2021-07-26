@@ -5,3 +5,6 @@
 Figures/
 Data/
 *.DS_Store
+
+# Ignore MS files for now
+MS_files/

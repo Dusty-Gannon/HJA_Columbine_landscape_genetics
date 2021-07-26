@@ -87,7 +87,7 @@ Let ${\bf W}$ be the matrix of edge weights with $w_{ij}=0$ if $i=j$. A *conditi
 $$
 \boldsymbol{\Sigma} = ({\bf M} - \rho{\bf W})^{-1},
 $$
-where ${\bf M}$ is a diagonal matrix with $m_{ii} = \sum_{j=1}^n w_{ij}$ and all off-diagonal elements equal to zero, and $\rho$ controls the amount of spatial autocorrelation in genotypes. Using results from [@mccullagh2009], we define a statistic model relating ${\bf D}$, the genetic distance matrix, to $\bm \Sigma$. Specifically,
+where ${\bf M}$ is a diagonal matrix with $m_{ii} = \sum_{j=1}^n w_{ij}$ and all off-diagonal elements equal to zero, and $\rho$ controls the amount of spatial autocorrelation in genotypes. Using results from [@mccullagh2009], we define a model relating ${\bf D}$, the genetic distance matrix, to $\bm \Sigma$. Specifically,
 
 $$
 {\bf L}(-{\bf D}){\bf L}^T \sim \mathcal{W}_\kappa({\bf L}2({\bf M - \rho{\bf W}})^{-1}{\bf L}^T),
@@ -97,39 +97,51 @@ where $\mathcal{W}_k({\bm \Gamma})$ denotes a Wishart distribution with degrees 
 This model differs from that of @hanks2013a in three ways. First, we include geographic distance as an explanatory variable in the log-linear model for the weights instead of multiplying the regression equation by the inverse of distance. We felt this was more natural since it allows edge weights to go to zero at great distances if the regression parameter associated with geographic distance is negative. Second, while the theoretical connection between this model and resistance distance [@mcrae2006;@hanks2013a] is stronger in the case where $\rho =1$ (i.e., an *intrinsic autoregressive model* - ICAR model), this defines a rank-deficient precision matrix. Because generalized inverses for rank-deficient matrices are known to be numerically unstable, we chose to put a prior on $\rho$ with most prior weight towards 1. This allows the model to tend towards the ICAR model without resulting in a rank-deficient precision matrix. Finally, @hanks2013a define $\kappa=K$, which is true when all loci are neutral and mutually independent. Because we do not know if this is the case for our SNP data, we assume $\kappa$ is an unknown parameter to be estimated.
 
 
-```{r}
-knitr::knit_exit()
-```
+### Explanatory variables of interest
 
 
 * **Geographic distance between plants $i$ and $j$ (km)**.
 
 * **Average flowering plant density within 5m of plants $i$ and $j$**. We expect that high flowering plant densities should attract more pollinators. Therefore, a given plant in a high density patch may export more pollen and sire more offspring in the surrounding area than a plant in a low density patch. This should result in higher allelic covariance between this plant and a randomly selected plant on the landscape.
 
-* **Average proportion of forested cells within a 500m radius around plants $i$ and $j$**. We use this as a measure of average "functional connectivity", hypothesizing that the more forest around a plant, the fewer pollinators will find it and therefore the less connected it is to other plants. We selected a cutoff of 500m based on previous work with hummingbirds which indicated a 50\% reduction in the probability of movement between two locations with an increase of 500m.
-
 * **Average canopy cover over plants $i$ and $j$**. The logic for including this explanatory variable is that well-connected plants (those not surrounded by lots of forest) may still be growing under a tree. This may reduce the chances of being visited by a pollinator if pollinators flying overhead are less likely to see the plant.
 
-* **Squared proportion of forested cells within a 500m radius**. Based on some data visualizations, it looks like there could be a peak of allelic covariance at intermediate levels surrounding forest. This does not seem unreasonable if plants and/or pollinators prefer some shade in the heat of the day or if hummingbirds prefer partially forested areas for the sake of nesting and perching.
+* **Average proportion of forested cells within a 500m radius around plants $i$ and $j$**. We use this as a measure of average "functional connectivity", hypothesizing that the more forest around a plant, the fewer pollinators will find it and therefore the less connected it is to other plants. We selected a cutoff of 500m based on previous work with hummingbirds which indicated a 50\% reduction in the probability of movement between two locations with an increase of 500m.
+
+* **Interaction between distance and density of conspecifics around plants $i$ and $j$**. We hypothesized that, for two plants that are far apart, high conspecific density may have a negative effect on genetic similarity if greater densities reduce the likelihood of any one plant being visited by a pollinator. However, at small distances, 
+
 
 * **Interaction between distance and canopy cover immediately over plants $i$ and $j$**. Because we think plants may be more difficult for a pollinator to find if growing beneath a tree, we might expect higher rates of mating between plants under the same tree (or trees), than two plants at the same distance but in the open. This should result in greater allelic covariance for two nearby plants under high canopy cover. However, two plants under different trees that are far apart may be very unlikely to mate. We therefore expect the effect of canopy cover to vary depending on geographic distance between plants $i$ and $j$.
 
+* **Interaction between distance and connectivity (isolation)**. Similar to the hypothesized relationship among genetic distance, geographic distance, and canopy cover, we expected that plants in isolated meadows may experience increased rates of mating among relatives if fewer pollinators travel to and from isolated locations. Thus, we would expect a positive effect of isolation on genetic similarity when comparing two plants found close in space, but a strong negative effect when comparing two plants found far apart.
+
+* **Indicator for instances in which plants were sampled from the same meadow complex**. Due to shared histories of founding events and other demographic processes that are known to affect genetic diversity and similarity, we expected that two plants that were sampled from the same meadow complex may be more closely related than those sampled from different meadow complexes, all else equal.
+
+* **Indicator for instances in which plants were sampled from the same meadow**. Similar reasoning to above.
 
 ### Priors
 
-We assume the following weakly informative priors for the regression parameters and $\rho$:
+We assume weakly informative priors for the regression parameters such that
 
 $$
-{\boldsymbol \beta} \sim \mathcal{N}({\bf 0}_P,\ {\bf I}_{(P\times P)}),
+{\boldsymbol \beta} \sim \mathcal{N}({\bf 0}_P,\ 5\cdot{\bf I}_{(P\times P)}).
 $$
 
-and
+For the parameter $\rho$, we place most prior weight towards 1 with the prior
 
 $$
-\rho \sim \mathcal{B}(2,2),
+\rho \sim \mathcal{B}(5,1),
 $$
 
-where $\mathcal{B}(\alpha, \beta)$ is a Beta distribution with shape parameters $\alpha$ and $\beta$.
+where $\mathcal{B}(\alpha, \beta)$ is a Beta distribution with shape parameters $\alpha$ and $\beta$. For the degrees of freedom parameter $\kappa$, we also put most prior weight towards the upper bound of $K$, the number of SNP loci, and away from the lower bound of $N$, the number of individuals (or nodes). Let $\kappa' \sim \mathcal{B}(5,1)$, then
+
+$$
+\kappa = (K-N)\kappa' + N
+$$
+
+such that $\kappa \in (N,K),\ K > N$, and most of the density is towards the upper limit. Finally, we define the prior for the standard deviation of the meadow effects, $\tau \sim \text{half-Normal}(0,2)$. 
+
+## Stan Model Code
 
 ```{stan output.var="wishart_edgeweight_model_re", eval=FALSE}
 
@@ -215,12 +227,12 @@ transformed parameters{
   W = make_W(N, beta, X, alpha_raw, Z, tau);  // define W based on loglinear model
   
   for(i in 1:N){
-    W_sum[i] = sum(W[i,]);
+    W_sum[i] = sum(W[i,]);                   // sum of each row
   }
   
-  M = diag_matrix(W_sum);
+  M = diag_matrix(W_sum);                    // diagonal matrix M
   
-  Sigma = inverse((M - (rho*W)));
+  Sigma = inverse((M - (rho*W)));            // definition of Sigma
   
   kappa = (K-N)*kappa_std + N;               // shift and scale degrees of freedom parameter
 
@@ -253,12 +265,18 @@ generated quantities{
 
 ```
 
+$~$
+
+**********
+
+## Loading and formatting data
+
 
 ```{r}
   load(here("Data", "Indiv_lndscp_gen.RData"))
 ```
 
-## Format the design matrix into an $n\times n\times p$ array
+### Format the design matrix into an $n\times n\times p$ array
 
 ```{r warning=FALSE}
 
@@ -317,19 +335,23 @@ generated quantities{
 
 ```
 
-## Create meadow indexing matrix Z
+### Create meadow indexing matrix Z
 
 ```{r}
 
 # Sanity check that things are in the right order
-all.equal(rownames(col_alLD), col_popgen_data$Sample)
+  all.equal(rownames(col_alLD), col_popgen_data$Sample)
 
-Z <- matrix(data = 0,
+# define empty matrix
+  Z <- matrix(data = 0,
             nrow = nrow(col_alLD),
             ncol = length(unique(col_popgen_data$MEADOW_ID)))
 
-mdws <- unique(col_popgen_data$MEADOW_ID)
+# get list of meadows
+  mdws <- unique(col_popgen_data$MEADOW_ID)
 
+# loop through to put 1's in blocks of Z
+# that correspond to each meadow
 for (i in 1:nrow(Z)) {
   col_id <- which(mdws == col_popgen_data$MEADOW_ID[i])
   Z[i, col_id] <- 1
@@ -337,8 +359,7 @@ for (i in 1:nrow(Z)) {
 
 ```
 
-
-## Fitting the model
+### Remaining data inputs
 
 ```{r}
 # list remainder of data inputs
@@ -355,19 +376,25 @@ for (i in 1:nrow(Z)) {
                    X=X_comb,
                    Z=Z,
                    al_LD=col_alLD)
-  
+```
+
+
+## Fitting the model
+
+```{r, eval=FALSE}
+
 # fit the model
   mfit <- sampling(wishart_edgeweight_model_re,
                    data=mod_data,
-                   iter=1000,
-                   chains=2,
+                   iter=2000,
+                   chains=3,
                    control=list(max_treedepth=12))
   
-  saveRDS(mfit, file =
-            here(
-              "Data",
-              "mfit_full_dist_interactions_wm_wc_re.rds"
-            ))
+  # saveRDS(mfit, file =
+  #           here(
+  #             "Data",
+  #             "mfit_full_dist_interactions_wm_wc_re.rds"
+  #           ))
 ```
 
 ```{r echo=FALSE}
@@ -377,8 +404,8 @@ mfit <- read_rds(
 ```
 
 
-```{r}
-# comparing models
+```{r eval=FALSE, echo=FALSE}
+# comparing models using DIC
   m1 <- read_rds(
     here("Data", 
          "mfit_full_dist_interactions_wm_wc_re.rds")
@@ -511,7 +538,7 @@ mfit <- read_rds(
     geom_point(aes(x=ID, y=obs), colour="red",
                size=0.2)
 
-# calculate proportion of observations outside the predictive range
+# calculate proportion of observations outside the 95% prediction intervals
   
   mean(
     (obs_v_pred$obs < obs_v_pred$low) |

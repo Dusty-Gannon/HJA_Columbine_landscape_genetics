@@ -1,0 +1,295 @@
+---
+title: "Population differentiation at missense mutations in flower genes"
+author: "D. G. Gannon"
+date: "March 2021"
+output:
+  github_document:
+    pandoc_args: --webtex
+bibliography: /Users/dusty/Documents/zotero_library.bib
+---
+
+```{r setup, include=FALSE, warning=FALSE}
+
+knitr::opts_chunk$set(echo = TRUE)
+
+  require(tidyverse)
+  require(here)
+  require(vcfR)
+
+  source(file = here(
+     "R",
+     "amova_functions.R"
+  ))
+  source(file = here(
+    "R",
+    "general_functions.R"
+  ))
+```
+
+## Load data
+
+```{r}
+
+ ves <- read.table(file = here("Data", "AQFO_vepreds.txt"), header = T)
+
+```
+
+load names of flower genes
+
+```{r}
+
+fgenes <- read.table(file = 
+              here("Data", "flower_genes.txt"),
+              header = F,
+              sep = "\t"
+          )
+names(fgenes) <- "gene_id"
+
+```
+
+
+Remove "version" identifiers from gene IDs in the `ensemble_vep` output.
+
+```{r}
+
+ves <- ves %>% mutate(
+  gene2 = str_replace_all(ves$Gene,
+                pattern = ".v3.1",
+                replacement = "")
+)
+
+```
+
+Match variants to flower genes
+
+```{r}
+
+flower_variants <- ves[
+  which(ves$gene2 %in% fgenes$gene_id),
+]
+
+```
+
+Remove duplicates and full variant effect dataset
+
+```{r}
+  flower_variants <- flower_variants[-which(duplicated(flower_variants$Location)), ]
+
+  rm(ves)
+```
+
+Filter out snps not in the "coding" dataset
+
+```{r}
+
+  snps <- read.vcfR(file = here(
+     "Data",
+     "AQFO_snps_cd.vcf"
+  ))
+
+  flower_variants <- flower_variants[
+     which(flower_variants$Uploaded_variation %in% snps@fix[,"ID"]),
+  ]
+  
+# summarize the flower-related genes
+  flower_variants %>%
+    group_by(Consequence) %>%
+    summarise(
+      n=n()
+    )
+ 
+
+```
+
+## Some notes on the missense variants
+
+```{r}
+
+# subset for missense genes
+  missense <- flower_variants[
+    which(flower_variants$Consequence == "missense_variant")
+    ,
+  ]
+
+# add some notes about function
+  missense$func_annot <- NA
+  
+  missense$func_annot[
+    which(
+      missense$gene2 == "Aqcoe1G053900" |
+      missense$gene2 == "Aqcoe1G244900" |
+      missense$gene2 == "Aqcoe4G030400" |
+      missense$gene2 == "Aqcoe5G304600"
+    )
+  ] <- "S-locus protein"
+  
+  missense$func_annot[
+    which(
+      missense$gene2 == "Aqcoe2G375700" |
+      missense$gene2 == "Aqcoe1G244900"
+    )
+  ] <- "incompatibility haplotypes"
+  
+  missense$func_annot[
+    which(missense$gene2 == "Aqcoe1G346100")
+  ] <- "stigma-specific protein"
+
+  missense$func_annot[
+    which(
+      missense$gene2 == "Aqcoe1G369400" |
+      missense$gene2 == "Aqcoe2G375700"
+    )
+      
+  ] <- "anthocyanin production"
+  
+  missense$func_annot[
+    which(
+      missense$gene2 == "Aqcoe4G080200"
+    )
+  ] <- "flavonoid production"
+  
+  missense$func_annot[
+    which(missense$gene2 == "Aqcoe5G448300")
+  ] <- "Carotene production"
+  
+  missense$func_annot[
+    which(
+      missense$gene2 == "Aqcoe2G234400" |
+      missense$gene2 == "Aqcoe2G234800"
+    )
+  ] <- "pollen-specific protein-like"
+  
+  missense$func_annot[
+    which(missense$gene2 == "Aqcoe5G135600")
+  ] <- "flowering time control protein"
+  
+  missense$func_annot[
+    which(missense$gene2 == "Aqcoe6G061600")
+  ] <- "pollen allergen-like protein"
+  
+  missense$func_annot[
+    which(missense$gene2 == "Aqcoe6G195100")
+  ] <- "pollen allergen"
+  
+  
+  sum_df <- missense %>%
+    group_by(func_annot) %>%
+    summarise(n=n())
+  
+  kableExtra::kable(
+    missense[,c("gene2", "func_annot")],
+    row.names = NA,
+    col.names = c("Gene", "Annotation")
+  )
+
+```
+
+
+
+## Create weights matrix with which to compute distances
+
+A weights matrix can be included in AMOVA to account for ancillary information on the markers being using to compute distances between pairs of individuals. We (arbitrarily) weight differences at loci where the alternative allele results in a missense mutation with 1, those that result in a synonymous mutation with 0.25, and any loci upstream or downstream of genes as 0.5. We then weight the off-diagonals elements $w_{ij}, i\ne j$ as the product of the diagonal elements and the inverse of the chromosome distance $d_{ij}$ (in kilobases) between the two loci such that
+
+$$
+w_{ij} = \frac{1}{d_{ij}}(w_{ii}w_{jj})\cdot \mathbb{I}\{i,j \text{ on the same chromosome} \},
+$$
+
+where $\mathbb{I}\{\cdot\}$ denotes the indicator function returning 1 if the argument in brackets in satisfied and 0 otherwise.
+
+
+```{r}
+
+# define weights of the diagonal based on effect of variants
+  flower_variants$weight <- 0.5
+  flower_variants$weight[
+     which(flower_variants$Consequence == "missense_variant")
+  ] <- 1
+  flower_variants$weight[
+     which(
+       flower_variants$Consequence == "synonymous_variant" |
+       flower_variants$Consequence == "intron_variant"
+     )
+  ] <- 0.25
+
+  
+# construct weights matrix
+  W <- diag(x=flower_variants$weight)
+
+  
+```
+
+## Compute distances
+
+```{r}
+
+# get dosage genotypes of individuals
+ dosage <- allele_load(snps)
+ dosage_fgenes <- 
+    as.data.frame(t(dosage[ which(snps@fix[,"ID"] %in% flower_variants$Uploaded_variation), ]))
+ dosage_fgenes$Sample <- rownames(dosage_fgenes)
+ 
+# order rows by pop, then by group (isolated vs. connected)
+ samp_dat <- read.table(
+    file = here(
+       "Data",
+       "sequenced_samples.txt"
+    ),
+    header = T,
+    sep = "\t"
+ )
+## create group column
+ samp_dat$iso <- substr(samp_dat$STRATUM, 3,3)
+ 
+## subset for merge
+ samp_dat_sub <- samp_dat[,which(
+    names(samp_dat) %in% c("Sample", "MEADOW_ID", "iso")
+ )]
+ 
+## merge the two datasets
+ dosage_fgenes <- merge(
+    samp_dat_sub,
+    dosage_fgenes,
+    by = "Sample"
+ )
+ 
+## order by group then population
+ dosage_fgenes <- 
+    dosage_fgenes[order(dosage_fgenes$iso, dosage_fgenes$MEADOW_ID), ]
+
+```
+
+## Estimate variance components
+
+```{r}
+
+# compute stat of interest
+ grp_diff_test <- perm_group_test(dosage_fgenes, W=W, nperm = 1000)
+ 
+# Observed ratio (Connected/Isolated)
+ obs_diff <- grp_diff_test$obs["C"] - grp_diff_test$obs["I"]
+ 
+ perm_diffs <- as.double(grp_diff_test$permutations[,1] - grp_diff_test$permutations[,2])
+ 
+# permutational p-value
+ mean(perm_diffs < -abs(obs_diff)) + mean(perm_diffs > abs(obs_diff))
+ 
+# permutational CIs
+
+## Connected meadows
+ quantile(
+   grp_diff_test$permutations[,1],
+   probs = c(0.025,0.975)
+ )
+ 
+## Isolated meadows
+ quantile(
+   grp_diff_test$permutations[,2],
+   probs = c(0.025,0.975)
+ )
+
+
+```
+
+
+
+

@@ -1,0 +1,408 @@
+---
+title: "Interactions figure"
+author: "D. G. Gannon"
+date: "March 2021"
+output:
+  github_document:
+    pandoc_args: --webtex
+bibliography: /Users/dusty/Documents/zotero_library.bib
+---
+
+```{r setup}
+
+# packages
+  require(tidyverse)
+  require(ggplot2)
+  require(here)
+  require(gridExtra)
+
+```
+
+## Load data
+
+```{r}
+# model fit
+  mfit <- readRDS(
+    here(
+      "Data",
+      "mfit_full_dist_interactions_wm_wc_re100.rds"
+    )
+  )
+
+# data
+  load(here(
+    "Data",
+    "Indiv_lndscp_gen.RData"
+  ))
+```
+
+
+## Extract posterior draws
+
+```{r}
+
+# extract regression coefficients
+  beta_post <- as.data.frame(rstan::extract(
+    mfit,
+    pars="beta"
+  ))
+
+# convert to matrix
+  beta_postmat <- as.matrix(beta_post)
+
+```
+
+## Create new data to predict for canopy cover interaction
+
+```{r}
+
+# number of new obs
+  n_new <- 200
+
+# new data matrix
+  X_new <- data.frame(
+    intercept = rep(1, n_new),
+    geo_dist = rep(
+      seq(
+        min(0), 
+        max(2), 
+        length.out = n_new/2
+      ),
+      2
+    ),
+    dens = rep(0, n_new),
+    cover = c(
+      rep(0, n_new/2),
+      rep(1, n_new/2)
+    ),
+    iso = rep(0, n_new)
+  )
+  
+# add interaction terms
+  X_new <- X_new %>% mutate(
+    dist_by_dens = rep(0, n_new),
+    dist_by_cover = geo_dist*cover,
+    dist_by_iso = geo_dist*iso,
+    Icomplex = rep(1, n_new),
+    Imeadow = rep(0, n_new)
+  )
+
+```
+
+### Create predictions and credible intervals
+
+```{r}
+
+# convert to matrix
+  X_newmat <- as.matrix(X_new)
+
+# predictions
+  post_preds <- X_newmat%*%t(beta_postmat)
+  
+# add predictive means and quantiles to new data 
+  X_new <- X_new %>% mutate(
+    pred = apply(post_preds, 1, mean),
+    low = apply(post_preds, 1, quantile, probs=0.025),
+    high = apply(post_preds, 1, quantile, probs=0.975)
+  )
+  
+# add categorical variable for the sake of coloring plot
+  X_new <- X_new %>% mutate(
+    trt = c(
+      rep("Open Canopy", n_new/2),
+      rep("Closed Canopy", n_new/2)
+    )
+  )
+
+```
+
+
+### Plot interaction between distance and canopy cover
+
+```{r}
+
+# create a theme
+  int_plottheme <- 
+     theme(
+       text = element_text(
+         color = "black"
+       ),
+       plot.title = element_text(
+         size=14
+       ),
+       axis.title = element_text(
+         size=14
+       ),
+       panel.grid = element_blank(),
+       panel.background = element_blank(),
+       axis.line = element_line(
+         color="black",
+         size=0.3
+       ),
+       legend.title = element_blank()
+     )
+
+# cover interaction plot
+  cover <- ggplot(data = X_new)+
+    geom_ribbon(
+      aes(x=geo_dist, ymin=low, ymax=high, fill=trt),
+      alpha=0.5
+    )+
+    geom_line(
+      aes(x=geo_dist, y=pred, group=trt),
+      size=1.2
+    )+
+    geom_line(
+      aes(x=geo_dist, y=pred, color=trt),
+      size=1
+    )+
+    xlim(c(0,2))+
+    ylim(-5.5,-3)+
+    int_plottheme+
+    xlab("Geographic distance (km)")+
+    ylab("")+
+    scale_color_manual(
+      values = c("#50514F", "#FFE066")
+    ) +
+    scale_fill_manual(
+      values = c("#50514F", "#FFE066")
+    )+
+    ggtitle("b)")
+
+```
+
+## Plot for isolation-distance interaction
+
+### New data
+
+```{r}
+# new dataset for isolation-distance interaction
+  X_new_iso <- data.frame(
+    intercept = X_new$intercept,
+    geo_dist = X_new$geo_dist,
+    dens = X_new$dens,
+    cover = rep(0, n_new),
+    iso = c(
+      rep(0, n_new/2),
+      rep(0.9, n_new/2)
+    )
+  )
+
+# add remaining variables
+  X_new_iso <- X_new_iso %>% mutate(
+    dist_by_dens = rep(0, n_new),
+    dist_by_cover = geo_dist*cover,
+    dist_by_iso = geo_dist*iso,
+    Icomplex = rep(1, n_new),
+    Imeadow = rep(0, n_new)
+  )
+  
+# convert to matrix for predictions
+  X_new_isomat <- as.matrix(X_new_iso)
+  
+# predictions
+  post_preds_iso <- X_new_isomat%*%t(beta_postmat)
+  
+# add predictions and intervals
+  X_new_iso <- X_new_iso %>% mutate(
+    pred = apply(post_preds_iso, 1, mean),
+    low = apply(post_preds_iso, 1, quantile, probs=0.025),
+    high = apply(post_preds_iso, 1, quantile, probs=0.975),
+    trt = rep(
+      c("Connected", "Isolated"),
+      each=n_new/2
+    )
+  )
+
+```
+
+
+### plot
+
+```{r}
+
+  isoplot <- ggplot(data = X_new_iso) +
+    geom_ribbon(
+      aes(x=geo_dist, ymin=low, ymax=high, fill=trt),
+      alpha=0.5
+    )+
+    geom_line(
+      aes(x=geo_dist, y=pred, group=trt),
+      size=1.2
+    )+
+    geom_line(
+      aes(x=geo_dist, y=pred, color=trt),
+      size=1
+    )+
+    xlim(c(0,2))+
+    ylim(-5.5,-3.5)+
+    int_plottheme +
+    xlab("")+
+    ylab("") +
+    ggtitle("a)")+
+    scale_fill_manual(
+      values = c("#13d0ffff", "#50514F")
+    )+
+    scale_color_manual(
+      values = c("#13d0ffff", "#50514F")
+    )
+
+```
+
+
+## combine and save
+
+```{r}
+
+png(
+  filename = here(
+    "Figures", "interaction_plots.png"
+  ),
+  height = 2100,
+  width = 1300,
+  res = 300,
+  units = "px"
+)
+  gridExtra::grid.arrange(isoplot, cover, nrow=2, ncol=1)
+dev.off()
+
+```
+
+## Estimates for conceptual figure
+
+```{r}
+
+# compute posterior means
+
+estims <- apply(beta_post, 2, mean)
+
+# predict weights for each situation
+under_close <- c(
+  intercept=1,
+  geo_dist=0,
+  dens = 1,
+  cover = 1,
+  iso = 0.1,
+  dist_by_dens=0,
+  dist_by_cover=0,
+  dist_by_iso=0,
+  Icomplex=1,
+  Imeadow=1
+)
+
+under_far <- c(
+  intercept=1,
+  geo_dist=2,
+  dens = 1,
+  cover = 1,
+  iso = 0.1,
+  dist_by_dens=2,
+  dist_by_cover=2,
+  dist_by_iso=0.2,
+  Icomplex=1,
+  Imeadow=1
+)
+
+wuc <- exp(under_close%*%estims)
+wuf <- exp(under_far%*%estims)
+
+open_close <- c(
+  intercept=1,
+  geo_dist=0,
+  dens = 1,
+  cover = 0,
+  iso = 0.1,
+  dist_by_dens=0,
+  dist_by_cover=0,
+  dist_by_iso=0,
+  Icomplex=1,
+  Imeadow=1
+)
+
+open_far <- c(
+  intercept=1,
+  geo_dist=2,
+  dens = 1,
+  cover = 0,
+  iso = 0.1,
+  dist_by_dens=2,
+  dist_by_cover=0,
+  dist_by_iso=0.2,
+  Icomplex=1,
+  Imeadow=1
+)
+
+wof <- exp(open_far%*%estims)
+woc <- exp(open_close%*%estims)
+```
+
+
+```{r}
+
+con_close <- c(
+  intercept=1,
+  geo_dist=0,
+  dens = 1,
+  cover = 0,
+  iso = 0,
+  dist_by_dens=0,
+  dist_by_cover=0,
+  dist_by_iso=0,
+  Icomplex=1,
+  Imeadow=1
+)
+
+iso_close <- c(
+  intercept=1,
+  geo_dist=0,
+  dens = 1,
+  cover = 0,
+  iso = 0.95,
+  dist_by_dens=0,
+  dist_by_cover=0,
+  dist_by_iso=0,
+  Icomplex=1,
+  Imeadow=1
+)
+
+con_far <- c(
+  intercept=1,
+  geo_dist=2,
+  dens = 1,
+  cover = 0,
+  iso = 0,
+  dist_by_dens=2,
+  dist_by_cover=0,
+  dist_by_iso=0,
+  Icomplex=1,
+  Imeadow=0
+)
+
+iso_far <- c(
+  intercept=1,
+  geo_dist=2,
+  dens = 1,
+  cover = 0,
+  iso = 0.9,
+  dist_by_dens=2,
+  dist_by_cover=0,
+  dist_by_iso=1.8,
+  Icomplex=1,
+  Imeadow=0
+)
+
+wcc <- exp(con_close%*%estims)
+wic <- exp(iso_close%*%estims)
+wcf <- exp(con_far%*%estims)
+wif <- exp(iso_far%*%estims)
+```
+
+
+
+
+
+
+
+
+
+

@@ -1,0 +1,152 @@
+---
+title: "Columbine focals - seed set model"
+author: "D. G. Gannon"
+date: "7/28/2021"
+output:
+  github_document
+---
+
+
+```{r setup, message=FALSE}
+
+  require(tidyverse)
+  require(here)
+  require(lme4)
+
+```
+
+## Data
+
+```{r}
+
+ sds <- read_csv(
+   file = here(
+     "Data",
+     "seed_sets.csv"
+   )
+ )
+
+```
+## average seed count per pod $\times$ flower
+
+```{r}
+
+# create summarized data
+
+sds2 <- group_by(sds, Plant, Date) %>%
+  summarise(
+    mean_sds = sum(seedsTotal)/sum(pods),
+    trt = unique(Treatment),
+    flrs_5m = mean(flrs_5m_radius),
+    iso=mean(forest_100m)
+  )
+
+# pollen limitation?
+sds2_uc <- sds2[-which(sds2$trt=="CAGED"), ]
+
+m <- lm(mean_sds~iso, data=sds2_uc)
+
+plot_open <- ggplot(data = sds2_uc, aes(x=iso, y=mean_sds))+
+  geom_point()+
+  geom_abline(
+    slope = m$coefficients[2], 
+    intercept = m$coefficients[1],
+    linetype="dashed"
+  )+
+  theme_bw()+
+    theme(
+      axis.title = element_text(
+        size=14
+      ),
+      panel.grid = element_blank()
+    )+
+  ylab("Seeds per seed pod")+
+  xlab("Isolation")
+
+# save plot
+# png(
+#   filename = here("Figures", "seed_set_fig.png"),
+#   height = 1200,
+#   width = 1200,
+#   res = 300,
+#   units = "px"
+# )
+#   plot_open
+# dev.off()
+
+```
+
+
+
+## Fitting a model
+
+```{r model and plot}
+
+  sds2$f.trt <- factor(sds2$trt, levels = c("UNCAGED", "CAGED"))
+  m1 <- lm(log(mean_sds)~f.trt*iso, data = sds2)
+
+new_df <- data.frame(
+  f.trt = factor(
+    rep(c("UNCAGED", "CAGED"), each=100),
+    levels=c("UNCAGED", "CAGED")
+  ),
+  iso = c(
+    seq(
+      min(sds2$iso[sds2$f.trt=="UNCAGED"]),
+      max(sds2$iso[sds2$f.trt=="UNCAGED"]),
+      length.out = 100
+    ),
+    seq(
+      min(sds2$iso[sds2$f.trt=="CAGED"]),
+      max(sds2$iso[sds2$f.trt=="CAGED"]),
+      length.out = 100
+    )
+  )  
+)
+
+preds <- predict(m1, newdata=new_df, re.form=NA)
+
+new_df$preds <- preds
+
+
+# Plot the fitted values
+
+  sds_plot <- ggplot()+
+    geom_point(
+      data = sds2,
+      aes(x=iso, y=log(mean_sds), color=f.trt)
+    ) +
+    geom_line(
+      data = new_df,
+      aes(x=iso, y=preds, color=f.trt),
+      linetype="dashed"
+    )+
+    theme_bw()+
+    theme(
+      axis.title = element_text(
+        size=14
+      )
+    )+
+    xlab("Isolation")+
+    ylab("log(seed set)")+
+    scale_color_manual(
+      values = c("#247BA0", "#50514F"),
+      labels =c("Open pollination", "Birds excluded")
+    )+
+    labs(color="Treatment")
+    
+  
+# # save plot
+#   png(
+#     filename = here("Figures", "seed_set_fig.png"),
+#     height = 900,
+#     width = 1500,
+#     res = 300,
+#     units = "px"
+#   )
+#     sds_plot
+#   dev.off()
+  
+
+```
+

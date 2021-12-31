@@ -1,0 +1,203 @@
+---
+title: "Dispersal kernel figure"
+author: "D. G. Gannon"
+date: "Sep 2021"
+output:
+  github_document:
+    pandoc_args: --webtex
+bibliography: /Users/dusty/Documents/zotero_library.bib
+---
+
+```{r setup}
+
+# packages
+  require(tidyverse)
+  require(ggplot2)
+  require(here)
+  require(gridExtra)
+
+```
+
+## Time til removal model
+
+```{r}
+
+# create density function
+ f_T_imp <- function(x, lam_f, lam_d, T_f, T_d){
+   
+   if(x < T_f){
+     dens <- dexp(x, rate = lam_f)
+   } else if(x < T_f + T_d) {
+     dens <- lam_f*exp(-lam_f*T_f + lam_d*T_f - lam_d*x)
+   } else if(x < 2*T_f + T_d){
+     dens <- lam_f*exp(-lam_d*T_d + lam_f*T_d - lam_f*x)
+   } else if(x < 2*(T_f + T_d)){
+     dens <- lam_f*exp(-2*lam_f*T_f + 2*lam_d*T_f - lam_d*x)
+   } else {
+     dens <- lam_f*exp(-2*T_d*lam_d + 2*lam_f*T_d - lam_f*x)
+   }
+   return(dens)
+ } 
+
+# function to find the expected value
+  E_T <- function(f, lam_f, lam_d, T_f, T_d, const){
+    new_f <- function(x, p1=lam_f, p2=lam_d, p3=T_f, p4=T_d){
+      (1/const)*x*f(x, p1, p2, p3, p4)
+    }
+    
+    integrate(new_f, 0, Inf)
+  }
+
+# define parameters
+  lam_f <- 0.5
+  lam_d <- 0.1
+  T_f <- 0.8
+  T_d <- 0.6
+
+# find the normalizing constant
+   norm_const <- integrate(
+     f_T_imp,
+     lower = 0,
+     upper = Inf,
+     lam_f=lam_f,
+     lam_d=lam_d,
+     T_f=T_f,
+     T_d=T_d
+   )
+
+# range of x and y values
+  xs <- seq(0, 8, length.out = 10000)
+  ys <- map_dbl(
+    xs,
+    ~f_T_imp(
+      .x,
+      lam_f, 
+      lam_d, 
+      T_f, 
+      T_d
+    )/norm_const$value
+  )
+  
+# expected value
+  mu <- E_T(
+    f_T_imp,
+    lam_f,
+    lam_d,
+    T_f,
+    T_d,
+    const = norm_const$value
+  )
+
+
+```
+
+## making a figure
+
+```{r}
+
+df_plot <- data.frame(
+  x=xs,
+  d_frag=ys,
+  d_con = dexp(xs, rate = lam_f)
+)
+
+plottheme <- theme(
+  panel.background = element_blank(),
+  axis.line = element_line(size=0.2),
+  axis.text = element_blank(),
+  axis.ticks.y = element_blank(),
+  text = element_text(family = "Arial")
+)
+
+cont <- ggplot(data = df_plot, aes(x=x))+
+  geom_line(aes(y=d_con), size=0.75)+
+  geom_segment(
+   aes(
+    x=1/lam_f, 
+    y=0,
+    xend=1/lam_f,
+    yend = dexp(1/lam_f, rate=lam_f)
+   ),
+   linetype="dashed",
+   size=0.25
+  ) +
+  plottheme+
+  xlab("Time")+
+  ylab(expression(italic("f"["T"["c"]]*"(t)")))+
+  ggtitle("a) Continuous habitat") +
+  annotate(
+    "text", parse=T, label="mu[c]",
+    x=1/lam_f,
+    y = dexp(1/lam_f, rate=lam_f) + 0.1
+  )
+
+
+
+frag <- ggplot(data = df_plot, aes(x=x))+
+  geom_line(aes(y=d_frag), size=0.75)+
+  geom_segment(
+   aes(
+    x=mu$value, 
+    y=0,
+    xend=mu$value,
+    yend = f_T_imp(
+      mu$value,
+      lam_f,
+      lam_d,
+      T_f,
+      T_d
+    )/norm_const$value
+   ),
+   linetype="dashed",
+   size=0.25
+  ) +
+  geom_segment(
+   aes(
+    x=1/lam_f, 
+    y=0,
+    xend=1/lam_f,
+    yend = f_T_imp(
+      1/lam_f,
+      lam_f,
+      lam_d,
+      T_f,
+      T_d
+    )/norm_const$value),
+   linetype="dashed",
+   color="lightgrey",
+   size=0.25
+  ) +
+  plottheme+
+  xlab("Time")+
+  ylab(expression(italic("f"["T"["p"]]*"(t)")))+
+  ggtitle("b) Patchy landscape")+
+  annotate(
+    "text", x=mu$value, parse=T,
+    label = "mu[p]",
+    y= f_T_imp(
+      mu$value,
+      lam_f,
+      lam_d,
+      T_f,
+      T_d
+    )/norm_const$value + 0.1
+  )
+
+svg(
+  filename = here("Figures", "pollen_disp2.svg"),
+  width = 6, height = 5, family = "Arial"
+)
+  grid.arrange(cont, frag, ncol=1)
+dev.off()
+
+```
+
+
+
+
+
+
+
+
+
+

@@ -9,7 +9,7 @@ Colleagues and I are testing these hypotheses using genetic data from 192 wester
 Experimental forest](https://andrewsforest.oregonstate.edu/). This repository documents all code used to analyze the data from our landscape genetics study. It includes a folder with
 
   - code used to process and prepare the genomic data
-  ([*Data_processing](https://github.com/Dusty-Gannon/HJA_Columbine_landscape_genetics/tree/master/Data_processing))
+  ([*Data_processing*](https://github.com/Dusty-Gannon/HJA_Columbine_landscape_genetics/tree/master/Data_processing))
   - code used to conduct the landscape genetics analysis
     ([*Analyses*](https://github.com/Dusty-Gannon/HJA_Columbine_landscape_genetics/tree/master/Analyses))
       - The primary analysis includes a [knitted pdf](https://github.com/Dusty-Gannon/HJA_Columbine_landscape_genetics/blob/master/Analyses/Edgeweight_estimation_gendist.pdf) of the code for readability

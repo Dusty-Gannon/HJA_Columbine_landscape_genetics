@@ -1,0 +1,157 @@
+---
+title: "Columbine focals - seed sets"
+author: "D. G. Gannon"
+date: "7/28/2021"
+output:
+  github_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+  library(tidyverse)
+  library(raster)
+  library(sf)
+  library(here)
+
+```
+
+
+```{r}
+
+  seeds <- read_csv(
+    here(
+      "Raw_Data",
+      "AQUFOR_seed_counts_16_17.csv"
+    )
+  )
+
+  plant_data <- read_csv(
+    here(
+      "Data",
+      "AQUFOR_focal_data.csv"
+    )
+  )
+
+```
+
+Create better plant identifier:
+
+```{r}
+
+  seeds$Plant <- paste(
+    seeds$Meadow, 
+    str_remove(seeds$Plant, "AQUFOR"), 
+    sep=""
+  )
+  plant_data$Plant <- paste(
+    plant_data$Meadow, 
+    str_remove(plant_data$Plant, "AQUFOR"), 
+    sep = ""
+  )
+  
+  # create a list of important columns
+  plnt_trt <- plant_data[
+    ,
+    which(
+      names(plant_data) %in% 
+        c(
+          "Plant",
+          "Treatment",
+          "flrs_5m_radius",
+          "x",
+          "y"
+        )
+    )
+  ]
+  
+# Plants without a defined treatment were not manipulated
+  plnt_trt$Treatment[is.na(plnt_trt$Treatment)] <- "UNCAGED"
+  
+# merge the two datasets
+  seeds2 <- merge(seeds, plnt_trt, by="Plant")
+  
+# total the seed count for a given plant
+  seed_cols <- str_which(names(seeds2), pattern = "seeds")
+  for(j in 1:length(seed_cols)){
+    seeds2[which(is.na(seeds2[,seed_cols[j]])), seed_cols[j]] <- 0
+  }
+  
+  seeds2$seedsTotal <- apply(seeds2[,seed_cols], 1, sum)
+  
+```
+
+
+
+```{r}
+
+# remove any that are without coordinates
+  seeds3 <- seeds2[
+    -which(is.na(seeds2$x))
+    ,
+  ]
+
+# now sum the total number of seeds and pods within a given 
+# treatment*meadow*year
+  cols2keep <- c(
+    "Plant", 
+    "Date", 
+    "Meadow", 
+    "pods", 
+    "seedsTotal", 
+    "Treatment", 
+    "flrs_5m_radius",
+    "x",
+    "y"
+  )
+  
+  seeds3 <- seeds3[,which(names(seeds3) %in% cols2keep)]
+
+# check that these all have data
+  which(!complete.cases(seeds3))
+
+```
+
+## Add landscape variables
+
+* Proportion of forest within a 500m buffer
+
+```{r}
+
+# load forest raster
+
+ forest <- raster(here(
+   "Data",
+   "forest2.tif"
+ ))
+
+# coordinate matrix
+coords <- as.matrix(seeds3[,c("x","y")])
+
+seeds3$forest_100m <- extract(forest, coords, buffer=100, fun=mean)
+
+```
+
+## Write out as final dataset
+
+```{r}
+  write.csv(
+    seeds3,
+    file = here(
+      "Data",
+      "seed_sets.csv"
+    ),
+    row.names = F,
+    quote = F
+  )
+```
+
+
+
+
+
+
+
+
+
+

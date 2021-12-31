@@ -8,3 +8,7 @@ Data/
 
 # Ignore MS files for now
 MS_files/
+
+# Ignore svg files
+*.svg
+

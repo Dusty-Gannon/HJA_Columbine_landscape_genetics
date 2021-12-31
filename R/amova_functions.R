@@ -3,24 +3,6 @@
 
 require(tidyverse)
 
-# Function to convert the "gt" object of a vcfR object
-# to a dosage and loading matrix
-
-allele_load <- function(vcf, sep="\\|"){
-  # extract character matrix
-  gt <- vcf@gt[,-1]
-  ld <- apply(
-    gt,
-    2,
-    FUN = function(v){
-      spl <- str_split(v, pattern = sep, n=2, simplify = T)
-      spl_num <- apply(spl, 2, as.numeric)
-      return(spl_num[,1] + spl_num[,2])
-    }
-  )
-  rownames(ld) <- vcf@fix[,"ID"]
-  return(ld)
-}
 
 # Function to compute (potentially weighted) (n x L) genetic distance matrix
 ## Function takes a dosage matrix with n individuals in rows and 

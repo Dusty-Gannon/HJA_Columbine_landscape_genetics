@@ -1,7 +1,7 @@
 ---
 title: "Preparing landscape genetic data by individuals"
 author: "D. G. Gannon"
-date: "October 2020"
+date: "Jan 2021"
 output:
   github_document:
     pandoc_args: --webtex
@@ -36,6 +36,7 @@ Load vcf file with SNPs from presumably non-coding regions and convert genotype 
 # Extract genotype matrix
   col_gt <- extract.gt(col_vcf, element = "GT", as.numeric = F)
   
+# compute allele load
   col_alLD <- allele_load(col_vcf)
 
 # label rows with snp IDs
@@ -46,10 +47,56 @@ Load vcf file with SNPs from presumably non-coding regions and convert genotype 
 
 ```
 
+### Create a random subset of the total snps to see if results are consistent
+
+```{r eval=FALSE}
+  
+# repeat the above for coding snps
+  col_vcf_cd <- read.vcfR(here("Data", "AQFO_snps_cd.vcf"))
+
+# compute allele load
+  col_alLD_cd <- allele_load(col_vcf_cd)
+  
+# Extract genotype matrix
+  col_gt_cd <- extract.gt(col_vcf_cd, element = "GT", as.numeric = F)
+  
+# label rows with snp IDs
+  rownames(col_alLD_cd) <- rownames(col_gt_cd)
+  
+#transpose
+  col_alLD_cd <- t(col_alLD_cd)
+  
+# sanity check
+  all.equal(
+    rownames(col_alLD),
+    rownames(col_alLD_cd)
+  )
+
+# cbind the two matrices and then select a random subset of snps
+  col_alLD_all <- cbind(col_alLD, col_alLD_cd)
+  
+# random subset
+  set.seed(35261)
+  rsnps <- sample(
+    1:ncol(col_alLD_all),
+    size = ncol(col_alLD),
+    replace = F
+  )
+  
+  col_alLD_rsub <- col_alLD_all[,rsnps]
+  
+# save the random subset
+  save(
+    col_alLD_rsub,
+    file = here("Data", "allele_loads_rand_subset.RData")
+  )
+
+```
+
 
 $~$
 
-#### Load field data collected on individual plants and meadows
+### Load field data collected on individual plants and meadows
   
   
 ```{r}

@@ -369,11 +369,11 @@ $~$
                    ),
                    cores=2)
   
-  # saveRDS(mfit, file =
-  #           here(
-  #             "Data",
-  #             "mfit_full_dist_interactions_wm_wc_re100.rds"
-  #           ))
+  saveRDS(mfit, file =
+            here(
+              "Data",
+              "mfit_full_rsub_dist_interactions_wm_wc_re100.rds"
+            ))
 ```
 
 ```{r echo=FALSE}

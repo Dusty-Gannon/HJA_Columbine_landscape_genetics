@@ -139,7 +139,7 @@ forest <- raster(here("Data", "forest.tif"))
           panel.grid.major.x = element_line(colour = "grey", size = 0.1),
           axis.text.y = element_text(colour = "black", size=12),
           axis.title = element_text(size=14))+
-    xlab(expression(beta[j]))+
+    xlab(expression(beta[p]))+
     scale_y_discrete(name="Posterior Density",
                      breaks=waiver(),
                      labels=labels[length(labels):1])
